@@ -9,7 +9,7 @@
 //   url         address of the HTML game to embed
 //   description one or two sentences for the card
 //   tags        up to three short labels
-//   art         card artwork: 'taco' | 'blocks' | 'dice' (anything else
+//   art         card artwork: 'taco' | 'city' | 'blocks' | 'dice' (anything else
 //               falls back to the game's first letter on its accent colour)
 //   accent      colour used by the fallback artwork
 
@@ -18,8 +18,8 @@ export const GAMES = [
     id: 'tacocraft',
     title: 'Tacocraft',
     url: 'https://sefrenethofficial.github.io/Tacocraft/',
-    description: 'Tacos. Crafting. Need we say more?',
-    tags: ['Crafting', 'Tacos'],
+    description: 'Terraria but Minecraft but tacos.',
+    tags: ['Sandbox', 'Crafting', 'Tacos'],
     art: 'taco',
     accent: '#FF9F1C',
   },
@@ -27,9 +27,9 @@ export const GAMES = [
     id: 'physick',
     title: 'Physick',
     url: 'https://sefrenethofficial.github.io/Physick/',
-    description: 'A physics sandbox. Spawn props, then blast, weld or fling them around.',
-    tags: ['Sandbox', 'Physics', '3D'],
-    art: 'blocks',
+    description: 'Survive in an epick GTA-like city.',
+    tags: ['Open world', 'City', '3D'],
+    art: 'city',
     accent: '#3A86FF',
   },
   {
@@ -45,7 +45,7 @@ export const GAMES = [
 
 // Ranks planned for the sign-in system. Only used for display right now.
 export const RANKS = [
-  { id: 'owner', title: 'Owner', blurb: 'Runs the HUB. Adds games, hands out ranks.', color: '#FDDC5C' },
-  { id: 'admin', title: 'Admin', blurb: 'Adds and manages HTML games.', color: '#F8BBD9' },
-  { id: 'player', title: 'Player', blurb: 'Plays everything, keeps a profile.', color: '#FFF7DC' },
+  { id: 'owner', title: 'Owner', blurb: 'Runs the HUB. Adds games, hands out ranks.', color: '#CC0000' },
+  { id: 'admin', title: 'Admin', blurb: 'Adds and manages HTML games.', color: '#0000CC' },
+  { id: 'player', title: 'Player', blurb: 'Plays everything, keeps a profile.', color: '#007A00' },
 ];

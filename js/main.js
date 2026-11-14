@@ -9,20 +9,35 @@ import * as THREE from '../vendor/three.module.min.js';
 import { GAMES, RANKS } from './games.js';
 
 const C = {
-  bg: '#16070f',
-  yellow: '#FDDC5C',
-  maroon: '#861B42',
-  pink: '#F8BBD9',
-  cream: '#FFF7DC',
+  bg: '#000008',
+  silver: '#C0C0C0',
+  navy: '#000080',
+  yellow: '#FFFF00',
+  lime: '#00FF00',
+  cyan: '#00FFFF',
+  magenta: '#FF00FF',
+  link: '#0000EE',
   ink: '#000000',
+  cream: '#FFF7DC',
+  pink: '#F8BBD9',
+  maroon: '#861B42',
 };
-const DISPLAY = '"Archivo Black", "Arial Black", Impact, system-ui, sans-serif';
-const BODY = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const TIMES = '"Times New Roman", Times, serif';
+const COMIC = '"Comic Sans MS", "Comic Sans", "Chalkboard SE", "Comic Neue", cursive';
+const SANS = 'Tahoma, "MS Sans Serif", Geneva, Verdana, sans-serif';
+const MONO = '"Courier New", Courier, monospace';
 const FOV = 40;
-const NAV_H = 64;
+const NAV_H = 52;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const $ = (id) => document.getElementById(id);
+
+// How many times this browser has opened the HUB (for the footer counter).
+let visits = 1;
+try {
+  visits = (parseInt(localStorage.getItem('eehub-visits'), 10) || 0) + 1;
+  localStorage.setItem('eehub-visits', String(visits));
+} catch (e) { /* storage unavailable: just show 1 */ }
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -34,7 +49,8 @@ const LOADING_IMAGES = ['assets/loading-stonks.jpg', 'assets/loading-invasion.jp
 const TIPS = [
   'Stonks only go up.',
   'What the heck is happening?',
-  'Polishing the awesome…',
+  'Dialing up at 56k…',
+  'Please wait, the modem is making noises…',
   'Asking the aliens to wait a moment…',
   'Reading the newspaper while it loads…',
   'Investing in fun.',
@@ -181,33 +197,36 @@ function rr(g, x, y, w, h, r) {
   g.closePath();
 }
 
-// The house style: flat fill, thick black outline, hard offset shadow.
-function slab(g, x, y, w, h, { fill, r = 14, line = 4, shadow = 7, shadowColor = C.ink, stroke = C.ink }) {
-  if (shadow) {
-    rr(g, x + shadow, y + shadow, w, h, r);
-    g.fillStyle = shadowColor;
-    g.fill();
-  }
-  rr(g, x + line / 2, y + line / 2, w - line, h - line, r - line / 2);
+// The house style: a grey Windows 95 bevel, raised or pressed in.
+function bevel(g, x, y, w, h, { fill = C.silver, pressed = false, t = 2 } = {}) {
   g.fillStyle = fill;
-  g.fill();
-  g.lineWidth = line;
-  g.strokeStyle = stroke;
-  g.stroke();
+  g.fillRect(x, y, w, h);
+  const edge = (i, tl, br) => {
+    g.fillStyle = tl;
+    g.fillRect(x + i, y + i, w - 2 * i, t);
+    g.fillRect(x + i, y + i, t, h - 2 * i);
+    g.fillStyle = br;
+    g.fillRect(x + i, y + h - i - t, w - 2 * i, t);
+    g.fillRect(x + w - i - t, y + i, t, h - 2 * i);
+  };
+  if (pressed) { edge(0, '#000000', '#ffffff'); edge(t, '#808080', '#dfdfdf'); }
+  else { edge(0, '#ffffff', '#000000'); edge(t, '#dfdfdf', '#808080'); }
 }
 
-function spacing(g, px) {
-  if ('letterSpacing' in g) g.letterSpacing = px + 'px';
+function rainbow(g, x0, x1) {
+  const grad = g.createLinearGradient(x0, 0, x1, 0);
+  ['#FF0000', '#FF9900', '#FFFF00', '#00FF00', '#00FFFF', '#3366FF', '#FF00FF'].forEach((c, i, a) => grad.addColorStop(i / (a.length - 1), c));
+  return grad;
 }
 
 // Largest font size (<= max) at which `text` fits in `width`.
-function fitFont(g, text, width, max, family, min = 12) {
+function fitFont(g, text, width, max, family, min = 12, style = '') {
   let size = max;
   for (; size > min; size -= 1) {
-    g.font = `${size}px ${family}`;
+    g.font = `${style} ${size}px ${family}`;
     if (g.measureText(text).width <= width) break;
   }
-  g.font = `${size}px ${family}`;
+  g.font = `${style} ${size}px ${family}`;
   return size;
 }
 
@@ -356,7 +375,7 @@ function artDice(g, w, h) {
 function artFallback(g, w, h, game) {
   g.fillStyle = game.accent || C.maroon;
   g.fillRect(0, 0, w, h);
-  g.font = `${h * 0.7}px ${DISPLAY}`;
+  g.font = `bold ${h * 0.7}px ${TIMES}`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.lineWidth = 6;
@@ -367,7 +386,49 @@ function artFallback(g, w, h, game) {
   g.fillText(letter, w / 2, h / 2);
 }
 
-const ART = { taco: artTaco, blocks: artBlocks, dice: artDice };
+function artCity(g, w, h) {
+  const sky = g.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, '#2B1055');
+  sky.addColorStop(0.7, '#FF5E3A');
+  sky.addColorStop(1, '#FFB347');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = '#FFE066';
+  g.beginPath();
+  g.arc(w * 0.78, h * 0.5, 30, 0, Math.PI * 2);
+  g.fill();
+  const road = h - 34;
+  const towers = [[0.02, 0.5], [0.14, 0.72], [0.27, 0.42], [0.4, 0.8], [0.55, 0.55], [0.68, 0.66], [0.84, 0.46]];
+  towers.forEach(([x, tall], i) => {
+    const bw = w * 0.13, bh = road * tall, bx = w * x, by = road - bh;
+    g.fillStyle = i % 2 ? '#1a1033' : '#241747';
+    g.fillRect(bx, by, bw, bh);
+    g.fillStyle = '#FFE066';
+    for (let wy = by + 9; wy < road - 12; wy += 15) {
+      for (let wx = bx + 7; wx < bx + bw - 9; wx += 13) {
+        if (Math.floor(wx * 7 + wy * 13 + i) % 5 > 1) g.fillRect(wx, wy, 6, 8);
+      }
+    }
+  });
+  g.fillStyle = '#2a2a2e';
+  g.fillRect(0, road, w, h - road);
+  g.fillStyle = '#FFE066';
+  for (let x = 6; x < w; x += 42) g.fillRect(x, road + 15, 22, 4);
+  // getaway car
+  const cx = w * 0.3, cy = road + 8;
+  g.fillStyle = '#E01B24';
+  g.fillRect(cx, cy - 12, 78, 16);
+  g.fillRect(cx + 16, cy - 26, 40, 16);
+  g.fillStyle = '#9BE7FF';
+  g.fillRect(cx + 21, cy - 22, 13, 9);
+  g.fillRect(cx + 38, cy - 22, 13, 9);
+  g.fillStyle = '#000';
+  [cx + 17, cx + 60].forEach((x) => { g.beginPath(); g.arc(x, cy + 5, 9, 0, Math.PI * 2); g.fill(); });
+  g.fillStyle = '#fff';
+  for (let i = 0; i < 3; i++) g.fillRect(cx - 14 - i * 14, cy - 8 + i * 5, 9, 3);
+}
+
+const ART = { taco: artTaco, blocks: artBlocks, city: artCity, dice: artDice };
 
 /* ------------------------------------------------------------------ */
 /* three.js scene                                                      */
@@ -440,18 +501,28 @@ function startHub(logoImage) {
     interactives.push({ mesh, zone, onClick, onHover });
   }
 
-  function button(label, w, h, { fill = C.yellow, color = C.ink, hoverFill = C.pink, size = 18 } = {}) {
+  // A grey Windows 95 push button; it presses in while hovered.
+  function button(label, w, h, { size = 14 } = {}) {
     const draw = (hover) => (g) => {
-      const off = hover ? 3 : 0;
-      slab(g, off, off, w - 6, h - 6, { fill: hover ? hoverFill : fill, r: 12, line: 3, shadow: 6 - off });
-      fitFont(g, label, w - 34, size, DISPLAY);
-      g.fillStyle = color;
+      bevel(g, 0, 0, w, h, { pressed: hover });
+      fitFont(g, label, w - 16, size, SANS, 10, 'bold');
+      g.fillStyle = C.ink;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(label, off + (w - 6) / 2, off + (h - 6) / 2 + 1);
+      const off = hover ? 1 : 0;
+      g.fillText(label, w / 2 + off, h / 2 + 1 + off);
     };
     const mesh = panel(w, h, draw(false));
     mesh.userData.setHover = (on) => mesh.userData.redraw(draw(on));
+    return mesh;
+  }
+
+  function flat(w, h, color, order) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }),
+    );
+    mesh.renderOrder = order;
     return mesh;
   }
 
@@ -470,101 +541,80 @@ function startHub(logoImage) {
   /* ---------- sections ---------- */
 
   function buildNav(cw, wide) {
-    const bar = new THREE.Mesh(
-      new THREE.PlaneGeometry(W * 3, NAV_H),
-      new THREE.MeshBasicMaterial({ color: C.bg, transparent: true, opacity: 0.92, depthTest: false }),
-    );
-    bar.renderOrder = 100;
-    const rule = new THREE.Mesh(
-      new THREE.PlaneGeometry(W * 3, 3),
-      new THREE.MeshBasicMaterial({ color: C.yellow, depthTest: false }),
-    );
-    rule.renderOrder = 101;
-    rule.position.y = -NAV_H / 2;
-    hud.add(bar, rule);
+    // Silver toolbar with a raised bottom edge.
+    const bar = flat(W * 3, NAV_H, C.silver, 100);
+    const hi = flat(W * 3, 2, '#ffffff', 101);
+    hi.position.y = NAV_H / 2 - 1;
+    const lo = flat(W * 3, 2, '#808080', 101);
+    lo.position.y = -NAV_H / 2 + 3;
+    const edge = flat(W * 3, 2, '#000000', 101);
+    edge.position.y = -NAV_H / 2 + 1;
+    hud.add(bar, hi, lo, edge);
 
     const left = -cw / 2;
     const logo = new THREE.Mesh(
-      new THREE.PlaneGeometry(40, 40),
+      new THREE.PlaneGeometry(36, 36),
       new THREE.MeshBasicMaterial({ map: logoTex, transparent: true, depthTest: false }),
     );
     logo.renderOrder = 102;
-    logo.position.set(left + 20, 0, 0);
+    logo.position.set(left + 18, 0, 0);
     hud.add(logo);
 
-    const brandText = W >= 620 ? 'EPIC ENTERTAINMENT HUB' : 'EE HUB';
-    const bw = W >= 620 ? 300 : 96;
+    const full = W >= 620;
+    const bw = full ? 270 : 92;
     const brand = panel(bw, 40, (g, w, h) => {
-      g.font = `19px ${DISPLAY}`;
+      g.font = `italic bold 21px ${TIMES}`;
       g.textBaseline = 'middle';
-      const split = brandText.lastIndexOf(' ');
-      const head = brandText.slice(0, split + 1);
-      g.fillStyle = '#fff';
+      const head = full ? 'Epic Entertainment ' : 'EE ';
+      g.fillStyle = C.navy;
       g.fillText(head, 0, h / 2 + 1);
-      g.fillStyle = C.yellow;
+      g.fillStyle = '#CC0000';
       g.fillText('HUB', g.measureText(head).width, h / 2 + 1);
     }, 102);
-    brand.position.set(left + 52 + bw / 2, 0, 0);
+    brand.position.set(left + 46 + bw / 2, 0, 0);
     hud.add(brand);
     // The logo + name act as the "home" link.
     const home = new THREE.Mesh(
-      new THREE.PlaneGeometry(52 + bw, 48),
+      new THREE.PlaneGeometry(46 + bw, 44),
       new THREE.MeshBasicMaterial({ visible: false }),
     );
-    home.position.set(left + (52 + bw) / 2, 0, 0);
+    home.position.set(left + (46 + bw) / 2, 0, 0);
     hud.add(home);
     interactive(home, 'hud', () => scrollTo(anchors.top));
 
     let x = cw / 2;
-    const addLink = (mesh, w, onClick) => {
+    const addLink = (label, w, onClick) => {
+      const mesh = button(label, w, 32);
       mesh.renderOrder = 102;
-      mesh.position.set(x - w / 2, -1, 0);
-      x -= w + (wide ? 14 : 8);
+      mesh.position.set(x - w / 2, 0, 0);
+      x -= w + 6;
       hud.add(mesh);
       interactive(mesh, 'hud', onClick, (on) => mesh.userData.setHover(on));
     };
-    const textLink = (label, w, onClick) => {
-      const draw = (hover) => (g, pw, ph) => {
-        g.font = `15px ${DISPLAY}`;
-        g.textAlign = 'center';
-        g.textBaseline = 'middle';
-        g.fillStyle = hover ? C.yellow : '#fff';
-        g.fillText(label, pw / 2, ph / 2 + 1);
-        if (hover) g.fillRect(pw / 2 - 16, ph - 8, 32, 3);
-      };
-      const mesh = panel(w, 40, draw(false));
-      mesh.userData.setHover = (on) => mesh.userData.redraw(draw(on));
-      addLink(mesh, w, onClick);
-    };
-    addLink(button('SIGN IN', 104, 44, { size: 14 }), 104,
-      () => toast('Sign-ins are coming soon'));
-    if (W >= 480) textLink('COMMUNITY', 118, () => scrollTo(anchors.community));
-    textLink('GAMES', 72, () => scrollTo(anchors.games));
+    addLink('Sign In', 78, () => toast('Sign-ins are coming soon!'));
+    if (W >= 480) addLink('Community', 96, () => scrollTo(anchors.community));
+    addLink('Games', 70, () => scrollTo(anchors.games));
   }
 
   function buildHero(y, cw, wide) {
-    const heroH = wide ? clamp(H * 0.74, 470, 640) : 0;
+    const heroH = wide ? clamp(H * 0.72, 460, 620) : 0;
     const R = wide ? clamp(cw * 0.15, 110, 165) : 92;
 
     // The logo, as a chunky spinning coin.
     const coin = new THREE.Group();
     const faceMat = new THREE.MeshBasicMaterial({ map: logoTex });
-    const edgeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const edgeMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
     const disc = new THREE.Mesh(new THREE.CylinderGeometry(R, R, R * 0.16, 72), [edgeMat, faceMat, faceMat]);
     disc.rotation.x = Math.PI / 2;
     disc.rotation.y = Math.PI / 2;
     coin.add(disc);
-    const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(R, 72),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55 }),
-    );
 
     let tw, th, textCx, textTop, coinX, coinY, align;
     if (wide) {
       tw = cw - (2 * R + 90);
-      th = 300;
+      th = 262;
       align = 'left';
-      const blockH = th + 70;
+      const blockH = th + 64;
       textTop = y + (heroH - blockH) / 2;
       textCx = cw / 2 - tw / 2;
       coinX = -cw / 2 + R + 14;
@@ -579,8 +629,7 @@ function startHub(logoImage) {
       textCx = 0;
     }
     coin.position.set(coinX, coinY, 0);
-    shadow.position.set(coinX + 14, coinY - 14, -60);
-    page.add(shadow, coin);
+    page.add(coin);
 
     let spin = 0, spinFrom = 0, spinT = 1;
     updaters.push((t, dt) => {
@@ -596,91 +645,149 @@ function startHub(logoImage) {
     });
     interactive(disc, 'page', () => {
       if (spinT >= 1) { spinFrom = spin; spinT = REDUCED ? 1 : 0; }
-      toast('Awesome.');
+      toast('Awesome!!!');
     });
+
+    // Blinking "NEW!" starburst pinned to the logo.
+    const burst = panel(104, 104, (g, w, h) => {
+      g.translate(w / 2, h / 2);
+      g.beginPath();
+      for (let i = 0; i < 28; i++) {
+        const rad = i % 2 ? 34 : 50;
+        const a = (i / 28) * Math.PI * 2;
+        g.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+      }
+      g.closePath();
+      g.fillStyle = '#FF0000';
+      g.fill();
+      g.lineWidth = 2;
+      g.strokeStyle = C.yellow;
+      g.stroke();
+      g.rotate(-0.25);
+      g.font = `bold 22px ${COMIC}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillStyle = C.yellow;
+      g.fillText('NEW!', 0, 1);
+    }, 12);
+    burst.position.set(coinX + R * 0.78, coinY + R * 0.78, 40);
+    page.add(burst);
+    if (!REDUCED) updaters.push((t) => { burst.visible = t % 1.4 < 1; });
 
     const text = panel(tw, th, (g, w) => {
       const ax = align === 'left' ? 0 : w / 2;
       g.textAlign = align;
       g.textBaseline = 'alphabetic';
 
-      const label = 'A BRANCH OF EPIC ENTERTAINMENT LLC';
-      spacing(g, wide ? 3 : 1.5);
-      for (let px = 13; px >= 9; px--) {
-        g.font = `700 ${px}px ${BODY}`;
-        if (g.measureText(label).width <= w - 4) break;
-      }
-      g.fillStyle = C.pink;
-      g.fillText(label, ax, 18);
-      spacing(g, 0);
+      const hello = '~*~ Welcome to the official homepage of ~*~';
+      fitFont(g, hello, w - 4, 17, COMIC, 10, 'bold');
+      g.fillStyle = C.yellow;
+      g.fillText(hello, ax, 20);
 
-      const size = fitFont(g, 'EPIC ENTERTAINMENT', w - 6, 68, DISPLAY, 22);
-      let by = 34 + size;
-      g.lineJoin = 'round';
-      g.lineWidth = Math.max(6, size * 0.16);
-      g.strokeStyle = C.ink;
-      g.strokeText('EPIC ENTERTAINMENT', ax, by);
-      g.fillStyle = '#fff';
-      g.fillText('EPIC ENTERTAINMENT', ax, by);
+      // Rainbow WordArt-style title
+      const title = 'EPIC ENTERTAINMENT';
+      const size = fitFont(g, title, w - 14, 70, TIMES, 22, 'italic bold');
+      const by = 36 + size;
+      const tW = g.measureText(title).width;
+      const x0 = align === 'left' ? 0 : (w - tW) / 2;
+      g.fillStyle = '#0000CC';
+      g.fillText(title, ax + 4, by + 4);
+      g.fillStyle = rainbow(g, x0, x0 + tW);
+      g.fillText(title, ax, by);
 
-      // Second row: "LLC" struck out, then the HUB badge.
-      const row = clamp(size * 1.05, 46, 70);
-      g.font = `${row * 0.62}px ${DISPLAY}`;
+      // Second row: "LLC" struck out, then HUB.
+      const row = clamp(size * 0.95, 44, 64);
+      g.font = `bold ${row * 0.7}px ${TIMES}`;
       const llcW = g.measureText('LLC').width;
-      g.font = `${row * 0.8}px ${DISPLAY}`;
-      const hubW = g.measureText('HUB').width + row * 0.6;
-      const rowW = llcW + 18 + hubW + 7;
+      g.font = `bold ${row}px ${COMIC}`;
+      const hubW = g.measureText('HUB').width;
+      const rowW = llcW + 18 + hubW;
       let x = align === 'left' ? 0 : (w - rowW) / 2;
-      const top = by + 22;
+      const base = by + 16 + row * 0.86;
       g.textAlign = 'left';
-      g.textBaseline = 'middle';
-      g.font = `${row * 0.62}px ${DISPLAY}`;
-      g.fillStyle = 'rgba(255,255,255,.45)';
-      g.fillText('LLC', x, top + row / 2 + 2);
-      g.fillStyle = C.pink;
-      g.fillRect(x - 4, top + row / 2 - 2, llcW + 8, 5);
+      g.font = `bold ${row * 0.7}px ${TIMES}`;
+      g.fillStyle = '#909090';
+      g.fillText('LLC', x, base);
+      g.fillStyle = '#FF0000';
+      g.fillRect(x - 4, base - row * 0.26, llcW + 8, 4);
       x += llcW + 18;
-      slab(g, x, top, hubW, row, { fill: C.yellow, r: 12, line: 4, shadow: 6 });
-      g.font = `${row * 0.8}px ${DISPLAY}`;
-      g.fillStyle = C.ink;
-      g.textAlign = 'center';
-      g.fillText('HUB', x + hubW / 2, top + row / 2 + 3);
+      g.font = `bold ${row}px ${COMIC}`;
+      g.fillStyle = C.magenta;
+      g.fillText('HUB', x + 3, base + 3);
+      g.fillStyle = C.lime;
+      g.fillText('HUB', x, base);
 
       g.textAlign = align;
-      g.textBaseline = 'alphabetic';
-      g.font = `18px ${BODY}`;
-      g.fillStyle = '#f1dfe7';
-      const lines = wrapLines(g, 'Every Sefreneth game in one place. Pick one, play it right here, and stick around — profiles, ranks and community-made games are on the way.', Math.min(w, 560), 4);
-      drawLines(g, lines, ax, top + row + 44, 26);
+      g.font = `19px ${TIMES}`;
+      g.fillStyle = '#ffffff';
+      const lines = wrapLines(g, 'Every Sefreneth game in one place! Pick one and play it right here. Profiles, ranks and community-made games are coming soon.', Math.min(w, 560), 4);
+      drawLines(g, lines, ax, base + 44, 25);
     });
     place(text, textCx, textTop, th);
     page.add(text);
 
-    const cta = button('PLAY THE GAMES', 236, 60, { size: 19 });
+    const cta = button('Click here to PLAY!', 220, 46, { size: 17 });
     const ctaTop = textTop + th + 10;
-    place(cta, wide ? textCx - tw / 2 + 118 : 0, ctaTop, 60);
+    place(cta, wide ? textCx - tw / 2 + 110 : 0, ctaTop, 46);
     page.add(cta);
     interactive(cta, 'page', () => scrollTo(anchors.games), (on) => cta.userData.setHover(on));
 
-    return wide ? y + heroH : ctaTop + 60 + 48;
+    return wide ? y + heroH : ctaTop + 46 + 40;
+  }
+
+  // A real scrolling marquee: one strip of text, repeated and slid sideways.
+  function buildMarquee(y, cw) {
+    const message = `*** WELCOME TO EPIC ENTERTAINMENT HUB ***  ${GAMES.length} GAMES ONLINE  ***  SIGN-INS COMING SOON  ***  THANKS FOR STOPPING BY!  `;
+    const probe = document.createElement('canvas').getContext('2d');
+    probe.font = `bold 17px ${COMIC}`;
+    const textW = Math.ceil(probe.measureText(message).width);
+    const h = 32;
+    const strip = panel(textW, h, (g, w, ph) => {
+      g.fillStyle = C.navy;
+      g.fillRect(0, 0, w, ph);
+      g.font = `bold 17px ${COMIC}`;
+      g.textBaseline = 'middle';
+      g.fillStyle = C.yellow;
+      g.fillText(message, 0, ph / 2 + 1);
+    });
+    strip.geometry.dispose();
+    strip.geometry = new THREE.PlaneGeometry(cw, h);
+    const tex = strip.material.map;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.repeat.set(cw / textW, 1);
+    place(strip, 0, y, h);
+    page.add(strip);
+    if (!REDUCED) updaters.push((t, dt) => { tex.offset.x = (tex.offset.x + (dt * 70) / textW) % 1; });
+    return y + h;
+  }
+
+  // The classic rainbow horizontal rule.
+  function buildRule(y, cw) {
+    const rule = panel(cw, 6, (g, w, h) => {
+      g.fillStyle = rainbow(g, 0, w);
+      g.fillRect(0, 0, w, h);
+    });
+    place(rule, 0, y, 6);
+    page.add(rule);
+    return y + 6;
   }
 
   function buildGames(y, cw) {
     const head = panel(cw, 84, (g) => {
       g.textBaseline = 'alphabetic';
-      g.font = `34px ${DISPLAY}`;
-      g.fillStyle = '#fff';
-      g.fillText('PLAYABLE GAMES', 0, 36);
-      const tw = g.measureText('PLAYABLE GAMES').width;
-      slab(g, tw + 14, 6, 48, 36, { fill: C.yellow, r: 10, line: 3, shadow: 4 });
-      g.font = `20px ${DISPLAY}`;
-      g.fillStyle = C.ink;
-      g.textAlign = 'center';
-      g.fillText(String(GAMES.length), tw + 14 + 22, 31);
-      g.textAlign = 'left';
-      g.font = `16px ${BODY}`;
-      g.fillStyle = C.pink;
-      g.fillText('Embedded right here — pick one and go.', 0, 68);
+      g.font = `bold 34px ${COMIC}`;
+      const label = 'Playable Games';
+      g.fillStyle = C.magenta;
+      g.fillText(label, 3, 39);
+      g.fillStyle = C.yellow;
+      g.fillText(label, 0, 36);
+      const tw = g.measureText(label).width;
+      g.font = `bold 22px ${TIMES}`;
+      g.fillStyle = C.cyan;
+      g.fillText(`(${GAMES.length})`, tw + 12, 36);
+      g.font = `italic 18px ${TIMES}`;
+      g.fillStyle = '#ffffff';
+      g.fillText('Embedded right here - pick one and go!', 0, 68);
     });
     place(head, 0, y, 84);
     page.add(head);
@@ -736,125 +843,160 @@ function startHub(logoImage) {
     return y + rows * cardH + (rows - 1) * gap;
   }
 
+  // Each game is a little Windows 95 window.
   function drawCard(g, w, h, game, hover) {
-    const bw = w - 10, bh = h - 10, artH = 178;
-    slab(g, 0, 0, bw, bh, { fill: C.cream, r: 18, line: 5, shadow: 9, shadowColor: hover ? C.yellow : C.ink });
+    const bw = w - 8, bh = h - 8, artH = 168;
+    g.fillStyle = hover ? C.yellow : 'rgba(0,0,0,.65)';
+    g.fillRect(8, 8, bw, bh);
+    bevel(g, 0, 0, bw, bh);
 
-    // artwork, clipped to the card's rounded top
-    g.save();
-    g.beginPath();
-    g.moveTo(5, artH + 5);
-    g.lineTo(5, 18);
-    g.arcTo(5, 5, 18, 5, 13);
-    g.lineTo(bw - 18, 5);
-    g.arcTo(bw - 5, 5, bw - 5, 18, 13);
-    g.lineTo(bw - 5, artH + 5);
-    g.closePath();
-    g.clip();
-    g.translate(5, 5);
-    (ART[game.art] || artFallback)(g, bw - 10, artH, game);
-    g.restore();
-    g.fillStyle = C.ink;
-    g.fillRect(3, artH + 3, bw - 6, 5);
+    // title bar
+    const bar = g.createLinearGradient(6, 0, bw - 6, 0);
+    bar.addColorStop(0, C.navy);
+    bar.addColorStop(1, '#1084D0');
+    g.fillStyle = bar;
+    g.fillRect(6, 6, bw - 12, 26);
+    g.textAlign = 'left';
+    g.textBaseline = 'middle';
+    g.fillStyle = '#ffffff';
+    fitFont(g, game.title + '.exe', bw - 100, 14, SANS, 10, 'bold');
+    g.fillText(game.title + '.exe', 12, 20);
+    ['_', '□', '×'].forEach((glyph, i) => {
+      const bx = bw - 10 - (3 - i) * 22 + (i === 2 ? 2 : 0), by = 9;
+      bevel(g, bx, by, 20, 20, { t: 1 });
+      g.fillStyle = C.ink;
+      g.font = `bold 13px ${SANS}`;
+      g.textAlign = 'center';
+      g.fillText(glyph, bx + 10, by + (glyph === '_' ? 7 : 11));
+    });
+
+    // artwork in a sunken frame, drawn chunky like an old GIF
+    const ax = 12, ay = 40, aw = bw - 24;
+    bevel(g, ax, ay, aw, artH, { pressed: true, fill: '#000' });
+    const px = 3;
+    const small = document.createElement('canvas');
+    small.width = Math.round((aw - 8) / px);
+    small.height = Math.round((artH - 8) / px);
+    const sg = small.getContext('2d');
+    sg.scale(1 / px, 1 / px);
+    (ART[game.art] || artFallback)(sg, aw - 8, artH - 8, game);
+    g.imageSmoothingEnabled = false;
+    g.drawImage(small, ax + 4, ay + 4, aw - 8, artH - 8);
+    g.imageSmoothingEnabled = true;
 
     g.textAlign = 'left';
     g.textBaseline = 'alphabetic';
     g.fillStyle = C.ink;
-    fitFont(g, game.title, bw - 40, 27, DISPLAY, 16);
-    g.fillText(game.title, 20, artH + 46);
+    fitFont(g, game.title, bw - 32, 27, TIMES, 16, 'bold');
+    g.fillText(game.title, 16, ay + artH + 36);
 
-    g.font = `15px ${BODY}`;
-    g.fillStyle = '#3d2630';
-    const lines = wrapLines(g, game.description || '', bw - 40, 3);
-    drawLines(g, lines, 20, artH + 72, 21);
+    g.font = `17px ${TIMES}`;
+    const lines = wrapLines(g, game.description || '', bw - 32, 3);
+    drawLines(g, lines, 16, ay + artH + 62, 21);
 
-    // tags
-    let tx = 20;
-    const ty = artH + 136;
-    g.font = `700 12px ${BODY}`;
-    g.textBaseline = 'middle';
+    // tags, styled as old-school links
+    let tx = 16;
+    const ty = ay + artH + 134;
+    g.font = `15px ${TIMES}`;
     for (const tag of (game.tags || []).slice(0, 3)) {
-      const tw = g.measureText(tag).width + 20;
-      if (tx + tw > bw - 20) break;
-      rr(g, tx, ty, tw, 24, 12);
-      g.fillStyle = '#fff';
-      g.fill();
-      g.lineWidth = 2;
-      g.strokeStyle = C.ink;
-      g.stroke();
-      g.fillStyle = C.ink;
-      g.fillText(tag, tx + 10, ty + 13);
-      tx += tw + 7;
+      const tw = g.measureText(tag).width;
+      if (tx + tw > bw - 16) break;
+      g.fillStyle = C.link;
+      g.fillText(tag, tx, ty);
+      g.fillRect(tx, ty + 2, tw, 1);
+      tx += tw + 14;
     }
 
     // play button
-    const bx = 20, by = bh - 70, bwid = bw - 40, bhgt = 50;
-    slab(g, bx, by, bwid, bhgt, { fill: hover ? C.maroon : C.yellow, r: 12, line: 3, shadow: hover ? 0 : 5 });
-    g.fillStyle = hover ? '#fff' : C.ink;
-    g.font = `20px ${DISPLAY}`;
+    const bx = 16, by = bh - 60, bwid = bw - 32, bhgt = 42;
+    bevel(g, bx, by, bwid, bhgt, { pressed: hover });
+    const off = hover ? 1 : 0;
+    g.fillStyle = C.ink;
+    g.font = `bold 18px ${SANS}`;
     g.textAlign = 'center';
+    g.textBaseline = 'middle';
     const label = 'PLAY';
     const lw = g.measureText(label).width;
-    g.fillText(label, bx + bwid / 2 - 12, by + bhgt / 2 + 2);
+    g.fillText(label, bx + bwid / 2 - 10 + off, by + bhgt / 2 + 1 + off);
     g.beginPath();
-    const px = bx + bwid / 2 + lw / 2 - 2, py = by + bhgt / 2;
-    g.moveTo(px, py - 9);
-    g.lineTo(px + 15, py);
-    g.lineTo(px, py + 9);
+    const tx2 = bx + bwid / 2 + lw / 2 - 2 + off, ty2 = by + bhgt / 2 + off;
+    g.moveTo(tx2, ty2 - 8);
+    g.lineTo(tx2 + 13, ty2);
+    g.lineTo(tx2, ty2 + 8);
     g.closePath();
     g.fill();
   }
 
   function buildCommunity(y, cw, wide) {
-    const pad = wide ? 34 : 22;
-    const badgeH = 92;
-    const h = wide ? 316 : 232 + RANKS.length * (badgeH + 12);
+    const pad = wide ? 30 : 18;
+    const cellH = 84;
+    const h = wide ? 296 : 260 + RANKS.length * (cellH + 8);
     const box = panel(cw, h, (g, w, ph) => {
-      const bw = w - 10, bh = ph - 10;
-      slab(g, 0, 0, bw, bh, { fill: C.maroon, r: 20, line: 5, shadow: 9 });
-      g.textBaseline = 'alphabetic';
-      g.textAlign = 'left';
-      const size = fitFont(g, 'COMMUNITY', bw - pad * 2, 32, DISPLAY);
-      g.fillStyle = '#fff';
-      g.fillText('COMMUNITY', pad, pad + size);
-      const tw = g.measureText('COMMUNITY').width;
-      g.font = `13px ${DISPLAY}`;
-      const chip = 'COMING SOON';
-      const cwid = g.measureText(chip).width + 22;
-      let chipX = pad + tw + 14, chipY = pad + size - 26;
-      if (chipX + cwid > bw - pad) { chipX = pad; chipY = pad + size + 10; }
-      slab(g, chipX, chipY, cwid, 28, { fill: C.pink, r: 9, line: 3, shadow: 3 });
-      g.fillStyle = C.ink;
-      g.textBaseline = 'middle';
-      g.fillText(chip, chipX + 11, chipY + 15);
+      // ridge-bordered table
+      bevel(g, 0, 0, w, ph, { t: 3 });
+      g.fillStyle = C.navy;
+      g.fillRect(8, 8, w - 16, ph - 16);
 
+      // hazard tape
+      const tapeH = 34;
+      g.save();
+      g.beginPath();
+      g.rect(8, 8, w - 16, tapeH);
+      g.clip();
+      g.fillStyle = C.yellow;
+      g.fillRect(8, 8, w - 16, tapeH);
+      g.fillStyle = C.ink;
+      for (let x = -tapeH; x < w; x += 36) {
+        g.beginPath();
+        g.moveTo(x, 8 + tapeH);
+        g.lineTo(x + 18, 8 + tapeH);
+        g.lineTo(x + 18 + tapeH, 8);
+        g.lineTo(x + tapeH, 8);
+        g.closePath();
+        g.fill();
+      }
+      g.restore();
+      g.font = `bold 15px ${SANS}`;
+      const uc = 'UNDER CONSTRUCTION';
+      const ucW = g.measureText(uc).width + 24;
+      g.fillStyle = C.ink;
+      g.fillRect(w / 2 - ucW / 2, 12, ucW, tapeH - 8);
+      g.fillStyle = C.yellow;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(uc, w / 2, 8 + tapeH / 2 + 1);
+
+      g.textAlign = 'left';
       g.textBaseline = 'alphabetic';
-      g.font = `17px ${BODY}`;
-      g.fillStyle = '#fbe9f0';
-      const textTop = (chipX === pad ? chipY + 62 : pad + size + 36);
-      const lines = wrapLines(g, 'Sign-ins are on the way. Once they land you get a profile and a rank, and Owners and Admins can add HTML games straight into the HUB.', Math.min(bw - pad * 2, 720), 5);
-      const endY = drawLines(g, lines, pad, textTop, 25);
+      const top = 8 + tapeH;
+      g.font = `bold 30px ${COMIC}`;
+      g.fillStyle = C.yellow;
+      g.fillText('Community', pad, top + 44);
+      g.font = `18px ${TIMES}`;
+      g.fillStyle = '#ffffff';
+      const lines = wrapLines(g, 'Sign-ins are on the way! Once they land you get a profile and a rank, and Owners and Admins can add HTML games straight into the HUB.', Math.min(w - pad * 2, 720), 5);
+      const endY = drawLines(g, lines, pad, top + 76, 24);
 
       const n = RANKS.length;
-      const gap = 16;
+      const gap = 10;
       RANKS.forEach((rank, i) => {
         let bx, by, bwid;
         if (wide) {
-          bwid = (bw - pad * 2 - gap * (n - 1)) / n;
+          bwid = (w - pad * 2 - gap * (n - 1)) / n;
           bx = pad + i * (bwid + gap);
-          by = bh - pad - badgeH;
+          by = ph - pad - cellH;
         } else {
-          bwid = bw - pad * 2;
+          bwid = w - pad * 2;
           bx = pad;
-          by = endY + 2 + i * (badgeH + 12);
+          by = endY - 4 + i * (cellH + 8);
         }
-        slab(g, bx, by, bwid - 5, badgeH - 5, { fill: rank.color, r: 14, line: 4, shadow: 5 });
+        bevel(g, bx, by, bwid, cellH);
+        g.fillStyle = rank.color;
+        g.font = `bold 21px ${TIMES}`;
+        g.fillText(rank.title, bx + 14, by + 32);
+        g.font = `16px ${TIMES}`;
         g.fillStyle = C.ink;
-        g.font = `19px ${DISPLAY}`;
-        g.fillText(rank.title.toUpperCase(), bx + 16, by + 34);
-        g.font = `14px ${BODY}`;
-        g.fillStyle = '#2c1a21';
-        drawLines(g, wrapLines(g, rank.blurb, bwid - 38, 2), bx + 16, by + 56, 18);
+        drawLines(g, wrapLines(g, rank.blurb, bwid - 28, 2), bx + 14, by + 54, 18);
       });
     });
     place(box, 0, y, h);
@@ -863,17 +1005,47 @@ function startHub(logoImage) {
   }
 
   function buildFooter(y, cw) {
-    const foot = panel(cw, 60, (g, w) => {
+    const h = 150;
+    const foot = panel(cw, h, (g, w) => {
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.font = `14px ${BODY}`;
-      g.fillStyle = 'rgba(248,187,217,.75)';
-      const lines = wrapLines(g, 'Epic Entertainment HUB · a branch of Epic Entertainment LLC · made by Sefreneth', w - 8, 3);
-      drawLines(g, lines, w / 2, 30 - (lines.length - 1) * 10, 20);
+
+      // visit counter (counts this browser's visits)
+      const digits = String(visits).padStart(6, '0');
+      g.font = `17px ${TIMES}`;
+      const pre = 'You have visited this page ', post = ' times';
+      const preW = g.measureText(pre).width, postW = g.measureText(post).width;
+      const boxW = digits.length * 17 + 8;
+      let x = (w - (preW + boxW + postW)) / 2;
+      g.textAlign = 'left';
+      g.fillStyle = '#ffffff';
+      g.fillText(pre, x, 24);
+      x += preW;
+      g.fillStyle = '#000000';
+      g.fillRect(x, 10, boxW, 28);
+      g.strokeStyle = '#808080';
+      g.lineWidth = 2;
+      g.strokeRect(x, 10, boxW, 28);
+      g.font = `bold 20px ${MONO}`;
+      g.fillStyle = C.lime;
+      [...digits].forEach((d, i) => g.fillText(d, x + 6 + i * 17, 25));
+      x += boxW;
+      g.font = `17px ${TIMES}`;
+      g.fillStyle = '#ffffff';
+      g.fillText(post, x, 24);
+
+      g.textAlign = 'center';
+      g.textBaseline = 'alphabetic';
+      g.font = `italic 15px ${TIMES}`;
+      g.fillStyle = C.cyan;
+      let ly = drawLines(g, wrapLines(g, 'Best viewed with Netscape Navigator 4.0 at 800x600 (or anything, really)', w - 8, 2), w / 2, 68, 19);
+      g.font = `15px ${TIMES}`;
+      g.fillStyle = '#c0c0c0';
+      drawLines(g, wrapLines(g, 'Epic Entertainment HUB - a branch of Epic Entertainment LLC - Webmaster: Sefreneth', w - 8, 3), w / 2, ly + 8, 19);
     });
-    place(foot, 0, y, 60);
+    place(foot, 0, y, h);
     page.add(foot);
-    return y + 60;
+    return y + h;
   }
 
   function buildBackground() {
@@ -881,7 +1053,7 @@ function startHub(logoImage) {
     const count = Math.round(clamp((W * (total + H)) / 9000, 120, 520));
     const pos = new Float32Array(count * 3);
     const col = new Float32Array(count * 3);
-    const palette = [C.yellow, C.pink, C.maroon, '#ffffff'].map((c) => new THREE.Color(c));
+    const palette = ['#ffffff', '#ffffff', C.yellow, C.cyan].map((c) => new THREE.Color(c));
     const rand = mulberry(7);
     for (let i = 0; i < count; i++) {
       const z = -150 - rand() * 1500;
@@ -896,7 +1068,7 @@ function startHub(logoImage) {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     const points = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 9, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.55,
+      size: 7, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.85,
     }));
     points.renderOrder = 0;
     page.add(points);
@@ -911,9 +1083,9 @@ function startHub(logoImage) {
     const n = Math.max(4, Math.round((total + H) / 420));
     for (let i = 0; i < n; i++) {
       const edges = new THREE.EdgesGeometry(shapes[i % shapes.length]);
-      const color = [C.maroon, C.yellow, C.pink][i % 3];
+      const color = [C.lime, C.cyan, C.magenta][i % 3];
       const mesh = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
-        color, transparent: true, opacity: color === C.maroon ? 0.6 : 0.3,
+        color, transparent: true, opacity: 0.4,
       }));
       const z = -500 - rand() * 700;
       const side = i % 2 ? 1 : -1;
@@ -962,12 +1134,13 @@ function startHub(logoImage) {
 
     let y = NAV_H;
     y = buildHero(y, cw, wide);
+    y = buildMarquee(y, cw) + 36;
     anchors.games = y - NAV_H - 18;
     y = buildGames(y, cw);
-    y += 72;
+    y = buildRule(y + 48, cw) + 44;
     anchors.community = y - NAV_H - 24;
     y = buildCommunity(y, cw, wide);
-    y += 24;
+    y = buildRule(y + 44, cw) + 20;
     y = buildFooter(y, cw);
     total = y + 16;
     maxScroll = Math.max(0, total - H);
@@ -1112,7 +1285,6 @@ async function boot() {
   try {
     const [logo] = await Promise.all([
       loadImage('assets/logo.png'),
-      document.fonts ? document.fonts.load(`20px "Archivo Black"`).catch(() => {}) : null,
     ]);
     hub = startHub(logo);
   } catch (err) {
