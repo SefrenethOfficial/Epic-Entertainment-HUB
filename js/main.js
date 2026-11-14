@@ -7,6 +7,8 @@
 
 import * as THREE from '../vendor/three.module.min.js';
 import { GAMES, RANKS } from './games.js';
+import * as backend from './backend.js';
+import * as dialogs from './dialogs.js';
 
 const C = {
   bg: '#000008',
@@ -146,6 +148,10 @@ document.addEventListener('visibilitychange', syncMusic);
 const frame = $('player-frame');
 let playing = null;
 let openToken = 0;
+let blobUrl = null;
+
+// Built-in games plus any added from inside the HUB.
+let allGames = [...GAMES];
 
 async function openGame(game) {
   if (playing === game) return;
@@ -154,7 +160,8 @@ async function openGame(game) {
   syncMusic();            // the game brings its own sound
   loader.show('Loading ' + game.title, nextLoadingImage());
   $('player-title').textContent = game.title;
-  $('player-open').href = game.url;
+  $('player-open').hidden = !game.url;
+  if (game.url) $('player-open').href = game.url;
   frame.title = game.title;
   $('player').hidden = false;
   history.replaceState(null, '', '#play=' + game.id);
@@ -163,7 +170,26 @@ async function openGame(game) {
   const loaded = new Promise((resolve) => {
     frame.addEventListener('load', resolve, { once: true });
   });
-  frame.src = game.url;
+  if (game.fileUrl) {
+    // An uploaded HTML file. It runs in a sandbox so it cannot touch the HUB
+    // or anyone's account, whatever the file contains.
+    frame.setAttribute('sandbox', 'allow-scripts allow-pointer-lock allow-forms allow-modals');
+    try {
+      const res = await fetch(game.fileUrl);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const html = await res.text();
+      if (token !== openToken) return;
+      blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+      frame.src = blobUrl;
+    } catch (err) {
+      console.error(err);
+      if (token === openToken) { closeGame(); toast('Could not load ' + game.title + '.'); }
+      return;
+    }
+  } else {
+    frame.removeAttribute('sandbox');
+    frame.src = game.url;
+  }
   // Keep the loading screen up long enough to be seen, but never forever.
   await Promise.all([wait(1600), Promise.race([loaded, wait(12000)])]);
   if (token !== openToken) return;
@@ -178,6 +204,7 @@ function closeGame() {
   syncMusic();
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   frame.src = 'about:blank';
+  if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
   $('player').hidden = true;
   loader.hideNow();
   history.replaceState(null, '', location.pathname + location.search);
@@ -188,7 +215,7 @@ function closeGame() {
 
 function gameFromHash() {
   const m = /^#play=([\w-]+)$/.exec(location.hash);
-  return m ? GAMES.find((g) => g.id === m[1]) : null;
+  return m ? allGames.find((g) => g.id === m[1]) : null;
 }
 
 $('player-back').addEventListener('click', closeGame);
@@ -206,23 +233,65 @@ addEventListener('hashchange', () => {
 
 // Hidden-until-focused buttons: keyboard and screen-reader access, and the
 // plain fallback when WebGL will not start.
-for (const game of GAMES) {
-  const li = document.createElement('li');
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.textContent = 'Play ' + game.title;
-  b.addEventListener('click', () => openGame(game));
-  li.appendChild(b);
-  $('quick-list').appendChild(li);
+function renderQuickList() {
+  const add = (label, action) => {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.addEventListener('click', action);
+    li.appendChild(b);
+    return li;
+  };
+  $('quick-list').replaceChildren(
+    ...allGames.map((game) => add('Play ' + game.title, () => openGame(game))),
+    add('Toggle music', toggleMusic),
+    add(backend.me ? 'My account' : 'Sign in or sign up', openAccountOrAuth),
+  );
 }
-{
-  const li = document.createElement('li');
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.textContent = 'Toggle music';
-  b.addEventListener('click', toggleMusic);
-  li.appendChild(b);
-  $('quick-list').appendChild(li);
+
+function openAccountOrAuth(mode = 'in') {
+  if (backend.me) dialogs.openAccount();
+  else if (backend.configured) dialogs.openAuth(mode);
+  else toast('Sign-ups are coming soon!');
+}
+
+// Reload the list of HUB-added games and redraw.
+async function refreshGames() {
+  try {
+    allGames = [...GAMES, ...(await backend.listGames())];
+  } catch (err) {
+    console.error('Could not load added games', err);
+  }
+  renderQuickList();
+  if (hub) hub.rebuild();
+}
+
+async function removeGameFlow(game) {
+  const yes = await dialogs.confirmWindow('Remove "' + game.title + '" from the HUB? This cannot be undone.', 'Remove');
+  if (!yes) return;
+  try {
+    await backend.removeGame(game);
+    toast(game.title + ' was removed.');
+  } catch (err) {
+    toast(err.message);
+  }
+  refreshGames();
+}
+
+// Pictures uploaded for HUB-added games, loaded once and shared by redraws.
+const imageCache = new Map();
+function cardImage(url, onReady) {
+  let entry = imageCache.get(url);
+  if (!entry) {
+    entry = { img: new Image(), ok: false, waiting: [] };
+    entry.img.crossOrigin = 'anonymous';   // needed to use it as a WebGL texture
+    entry.img.onload = () => { entry.ok = true; entry.waiting.splice(0).forEach((fn) => fn()); };
+    entry.img.src = url;
+    imageCache.set(url, entry);
+  }
+  if (!entry.ok && onReady) entry.waiting.push(onReady);
+  return entry.ok ? entry.img : null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -635,7 +704,12 @@ function startHub(logoImage) {
       hud.add(mesh);
       interactive(mesh, 'hud', onClick, (on) => mesh.userData.setHover(on));
     };
-    addLink('Sign In', 78, () => toast('Sign-ins are coming soon!'));
+    if (backend.me) {
+      const name = backend.me.username;
+      addLink(name.length > 11 ? name.slice(0, 10) + '…' : name, full ? 104 : 78, () => dialogs.openAccount());
+    } else {
+      addLink('Sign In', 78, () => openAccountOrAuth('in'));
+    }
     if (W >= 480) addLink('Community', 96, () => scrollTo(anchors.community));
     addLink('Games', 70, () => scrollTo(anchors.games));
     // Music switch: stays pressed in while the song is on.
@@ -767,7 +841,7 @@ function startHub(logoImage) {
       g.textAlign = align;
       g.font = `19px ${TIMES}`;
       g.fillStyle = '#ffffff';
-      const lines = wrapLines(g, 'Every Sefreneth game in one place! Pick one and play it right here. Profiles, ranks and community-made games are coming soon.', Math.min(w, 560), 4);
+      const lines = wrapLines(g, 'Every Sefreneth game in one place! Pick one and play it right here. ' + (backend.configured ? 'Sign up for a profile and a rank!' : 'Profiles, ranks and community-made games are coming soon.'), Math.min(w, 560), 4);
       drawLines(g, lines, ax, base + 44, 25);
     });
     place(text, textCx, textTop, th);
@@ -784,7 +858,7 @@ function startHub(logoImage) {
 
   // A real scrolling marquee: one strip of text, repeated and slid sideways.
   function buildMarquee(y, cw) {
-    const message = `*** WELCOME TO EPIC ENTERTAINMENT HUB ***  ${GAMES.length} GAMES ONLINE  ***  SIGN-INS COMING SOON  ***  THANKS FOR STOPPING BY!  `;
+    const message = `*** WELCOME TO EPIC ENTERTAINMENT HUB ***  ${allGames.length} GAMES ONLINE  ***  ${backend.configured ? 'SIGN UP TODAY - IT IS FREE' : 'SIGN-INS COMING SOON'}  ***  THANKS FOR STOPPING BY!  `;
     const probe = document.createElement('canvas').getContext('2d');
     probe.font = `bold 17px ${COMIC}`;
     const textW = Math.ceil(probe.measureText(message).width);
@@ -831,7 +905,7 @@ function startHub(logoImage) {
       const tw = g.measureText(label).width;
       g.font = `bold 22px ${TIMES}`;
       g.fillStyle = C.cyan;
-      g.fillText(`(${GAMES.length})`, tw + 12, 36);
+      g.fillText(`(${allGames.length})`, tw + 12, 36);
       g.font = `italic 18px ${TIMES}`;
       g.fillStyle = '#ffffff';
       g.fillText('Embedded right here - pick one and go!', 0, 68);
@@ -840,15 +914,24 @@ function startHub(logoImage) {
     page.add(head);
     y += 84 + 22;
 
+    // Owners and Admins get an "add a game" button next to the heading.
+    if (backend.isStaff()) {
+      const add = button('+ Add a game…', 150, 36);
+      if (cw >= 560) place(add, cw / 2 - 75, y - 84 - 22 + 4, 36);
+      else { place(add, -cw / 2 + 75, y - 10, 36); y += 44; }
+      page.add(add);
+      interactive(add, 'page', () => dialogs.openAddGame(), (on) => add.userData.setHover(on));
+    }
+
     const gap = 30;
     const cardW = Math.min(336, cw);
     const cardH = 424;
     const cols = clamp(Math.floor((cw + gap) / (cardW + gap)), 1, 3);
     const rowW = (n) => n * cardW + (n - 1) * gap;
 
-    GAMES.forEach((game, i) => {
+    allGames.forEach((game, i) => {
       const col = i % cols, row = Math.floor(i / cols);
-      const inRow = Math.min(cols, GAMES.length - row * cols);
+      const inRow = Math.min(cols, allGames.length - row * cols);
       const x0 = cols > 1 && cw >= rowW(cols) ? -cw / 2 : -rowW(inRow) / 2;
       const stretch = cols > 1 ? (cw - rowW(cols)) / (cols - 1) : 0;
       const cx = x0 + cardW / 2 + col * (cardW + gap + stretch);
@@ -858,6 +941,8 @@ function startHub(logoImage) {
       const card = panel(cardW, cardH, draw(false));
       place(card, cx, top, cardH);
       page.add(card);
+
+      if (game.image) cardImage(game.image, () => { if (card.parent) card.userData.redraw(draw(Boolean(card.userData.hover))); });
 
       const baseY = card.position.y;
       const target = { rx: 0, ry: 0, z: 0, s: 1 };
@@ -870,7 +955,14 @@ function startHub(logoImage) {
         card.scale.setScalar(s);
         card.position.y = baseY + (REDUCED ? 0 : Math.sin(t * 1.1 + i * 1.7) * 3);
       });
-      interactive(card, 'page', () => openGame(game), (on, hit) => {
+      interactive(card, 'page', (hit) => {
+        // The window's close box removes a HUB-added game (Owners and Admins only).
+        if (game.removable && backend.isStaff() && hit && hit.uv) {
+          const px = hit.uv.x * cardW, py = (1 - hit.uv.y) * cardH;
+          if (px > cardW - 42 && py < 34) return removeGameFlow(game);
+        }
+        openGame(game);
+      }, (on, hit) => {
         if (on && hit && hit.uv && !REDUCED) {
           target.ry = (hit.uv.x - 0.5) * 0.3;
           target.rx = (hit.uv.y - 0.5) * 0.22;
@@ -886,7 +978,7 @@ function startHub(logoImage) {
         }
       });
     });
-    const rows = Math.ceil(GAMES.length / cols);
+    const rows = Math.ceil(allGames.length / cols);
     return y + rows * cardH + (rows - 1) * gap;
   }
 
@@ -911,7 +1003,7 @@ function startHub(logoImage) {
     ['_', '□', '×'].forEach((glyph, i) => {
       const bx = bw - 10 - (3 - i) * 22 + (i === 2 ? 2 : 0), by = 9;
       bevel(g, bx, by, 20, 20, { t: 1 });
-      g.fillStyle = C.ink;
+      g.fillStyle = i === 2 && game.removable && backend.isStaff() ? '#C00000' : C.ink;
       g.font = `bold 13px ${SANS}`;
       g.textAlign = 'center';
       g.fillText(glyph, bx + 10, by + (glyph === '_' ? 7 : 11));
@@ -920,6 +1012,14 @@ function startHub(logoImage) {
     // artwork in a sunken frame, drawn chunky like an old GIF
     const ax = 12, ay = 40, aw = bw - 24;
     bevel(g, ax, ay, aw, artH, { pressed: true, fill: '#000' });
+    const pic = game.image ? cardImage(game.image) : null;
+    if (pic) {
+      // uploaded picture, cropped to fill the frame
+      const fw = aw - 8, fh = artH - 8;
+      const scale = Math.max(fw / pic.naturalWidth, fh / pic.naturalHeight);
+      const sw = fw / scale, sh = fh / scale;
+      g.drawImage(pic, (pic.naturalWidth - sw) / 2, (pic.naturalHeight - sh) / 2, sw, sh, ax + 4, ay + 4, fw, fh);
+    } else {
     const px = 3;
     const small = document.createElement('canvas');
     small.width = Math.round((aw - 8) / px);
@@ -930,6 +1030,7 @@ function startHub(logoImage) {
     g.imageSmoothingEnabled = false;
     g.drawImage(small, ax + 4, ay + 4, aw - 8, artH - 8);
     g.imageSmoothingEnabled = true;
+    }
 
     g.textAlign = 'left';
     g.textBaseline = 'alphabetic';
@@ -977,7 +1078,13 @@ function startHub(logoImage) {
   function buildCommunity(y, cw, wide) {
     const pad = wide ? 30 : 18;
     const cellH = 84;
-    const h = wide ? 296 : 260 + RANKS.length * (cellH + 8);
+    const tapeH = backend.configured ? 0 : 34;   // "under construction" until accounts are switched on
+    const h = (wide ? 262 : 226 + RANKS.length * (cellH + 8)) + tapeH;
+    const blurb = !backend.configured
+      ? 'Sign-ins are on the way! Once they land you get a profile and a rank, and Owners and Admins can add HTML games straight into the HUB.'
+      : backend.me
+        ? `You are signed in as ${backend.me.username} (${backend.me.rank.charAt(0).toUpperCase() + backend.me.rank.slice(1)}). Owners and Admins can add HTML games straight into the HUB.`
+        : 'Sign up to get a profile and a rank! Owners and Admins can add HTML games straight into the HUB.';
     const box = panel(cw, h, (g, w, ph) => {
       // ridge-bordered table
       bevel(g, 0, 0, w, ph, { t: 3 });
@@ -985,7 +1092,7 @@ function startHub(logoImage) {
       g.fillRect(8, 8, w - 16, ph - 16);
 
       // hazard tape
-      const tapeH = 34;
+      if (tapeH) {
       g.save();
       g.beginPath();
       g.rect(8, 8, w - 16, tapeH);
@@ -1012,6 +1119,7 @@ function startHub(logoImage) {
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillText(uc, w / 2, 8 + tapeH / 2 + 1);
+      }
 
       g.textAlign = 'left';
       g.textBaseline = 'alphabetic';
@@ -1021,7 +1129,7 @@ function startHub(logoImage) {
       g.fillText('Community', pad, top + 44);
       g.font = `18px ${TIMES}`;
       g.fillStyle = '#ffffff';
-      const lines = wrapLines(g, 'Sign-ins are on the way! Once they land you get a profile and a rank, and Owners and Admins can add HTML games straight into the HUB.', Math.min(w - pad * 2, 720), 5);
+      const lines = wrapLines(g, blurb, Math.min(w - pad * 2, 720), 5);
       const endY = drawLines(g, lines, pad, top + 76, 24);
 
       const n = RANKS.length;
@@ -1048,7 +1156,21 @@ function startHub(logoImage) {
     });
     place(box, 0, y, h);
     page.add(box);
-    return y + h;
+    y += h;
+
+    // Account buttons under the table, once accounts are switched on.
+    if (backend.configured) {
+      y += 16;
+      const first = button(backend.me ? 'My Account' : 'Sign Up - it is free!', 190, 40, { size: 15 });
+      const second = button('Members', 120, 40, { size: 15 });
+      place(first, -65, y, 40);
+      place(second, 100, y, 40);
+      page.add(first, second);
+      interactive(first, 'page', () => openAccountOrAuth('up'), (on) => first.userData.setHover(on));
+      interactive(second, 'page', () => dialogs.openMembers(), (on) => second.userData.setHover(on));
+      y += 40;
+    }
+    return y;
   }
 
   function buildFooter(y, cw) {
@@ -1276,7 +1398,8 @@ function startHub(logoImage) {
     scrollTo(scrollTarget + e.deltaY * unit);
   }, { passive: false });
   addEventListener('keydown', (e) => {
-    if (playing || e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement) return;
+    if (playing || document.querySelector('dialog[open]')) return;
+    if (e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement) return;
     const step = { ArrowDown: 80, ArrowUp: -80, PageDown: H * 0.85, PageUp: -H * 0.85, ' ': H * 0.85 }[e.key];
     if (step !== undefined) { e.preventDefault(); scrollTo(scrollTarget + step); }
     else if (e.key === 'Home') scrollTo(0);
@@ -1327,6 +1450,7 @@ function loadImage(src) {
 }
 
 async function boot() {
+  renderQuickList();
   loader.show('Loading the HUB', 'assets/loading-invasion.jpg');
   const started = performance.now();
   try {
@@ -1338,6 +1462,14 @@ async function boot() {
     console.error('3D interface failed to start', err);
     document.body.classList.add('no-webgl');
   }
+  // Accounts load in the background so a sleeping server never blocks the page.
+  dialogs.setHooks({ toast, gamesChanged: refreshGames });
+  backend.onAccountChange(() => { renderQuickList(); if (hub) hub.rebuild(); });
+  backend.start().then(refreshGames).then(() => {
+    const linked = gameFromHash();           // a share link to a HUB-added game
+    if (linked && !playing) openGame(linked);
+  });
+
   await wait(Math.max(0, 1300 - (performance.now() - started)));
   const deepLink = gameFromHash();
   if (deepLink) {

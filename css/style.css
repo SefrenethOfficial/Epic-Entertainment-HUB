@@ -229,3 +229,102 @@ body.no-webgl #quick-list button { position: static; width: 100%; text-align: le
   .loader-logo { animation: none; }
   #loader, #loader-fill { transition: none; }
 }
+
+/* ---------- pop-up windows (sign in, account, members, add a game) ---------- */
+dialog.win {
+  padding: 3px;
+  border: 0;
+  background: var(--silver);
+  color: #000;
+  box-shadow: var(--raised), 6px 6px 0 rgba(0, 0, 0, .55);
+  font: 14px var(--sans);
+  max-height: calc(100vh - 20px);
+  overflow: auto;
+}
+dialog.win::backdrop { background: rgba(0, 0, 32, .55); }
+.win-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 7px;
+  background: linear-gradient(90deg, #000080, #1084D0);
+  color: #fff;
+  font: bold 13px var(--sans);
+}
+.win-x {
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: var(--silver);
+  color: #000;
+  box-shadow: var(--raised);
+  font: bold 14px/1 var(--sans);
+  cursor: pointer;
+}
+.win-x:active { box-shadow: var(--pressed); }
+.win-body { padding: 14px 12px 12px; }
+.win-form { display: flex; flex-direction: column; gap: 10px; }
+.win-form p { margin: 0; line-height: 1.4; }
+.win-field { display: flex; flex-direction: column; gap: 3px; }
+.win-field[hidden] { display: none; }
+.win-field > span { font-weight: bold; }
+.win-field small, .win-small { color: #333; font-size: 12px; }
+.win-form input[type="text"], .win-form input[type="email"], .win-form input[type="password"],
+.win-form input[type="url"], .win-form textarea, .win-form select {
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  color: #000;
+  font: 15px var(--sans);
+  box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf;
+}
+.win-form select { width: auto; padding: 3px 4px; }
+.win-form textarea { resize: vertical; }
+.win-form input[type="file"] { font: 13px var(--sans); max-width: 100%; }
+.win-form input:focus-visible, .win-form textarea:focus-visible, .win-form select:focus-visible {
+  outline: 2px solid #000080;
+  outline-offset: 1px;
+}
+.win-group { margin: 0; padding: 6px 10px 8px; border: 2px groove #fff; display: flex; flex-direction: column; gap: 4px; }
+.win-group legend { padding: 0 4px; font-weight: bold; }
+.win-radio { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.win-tabs { display: flex; gap: 4px; margin-bottom: 2px; }
+.win-btn, .win-tab {
+  min-width: 84px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--silver);
+  color: #000;
+  font: 13px var(--sans);
+  box-shadow: var(--raised);
+  cursor: pointer;
+}
+.win-btn.primary { font-weight: bold; outline: 1px solid #000; }
+.win-btn:active, .win-tab:active, .win-tab[aria-pressed="true"] { box-shadow: var(--pressed); }
+.win-tab[aria-pressed="true"] { font-weight: bold; }
+.win-btn:focus-visible, .win-tab:focus-visible, .win-x:focus-visible { outline: 1px dotted #000; outline-offset: -5px; }
+.win-btn:disabled { color: #808080; text-shadow: 1px 1px #fff; cursor: default; }
+.win-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.win-actions.stack { flex-direction: column; }
+.win-status { min-height: 1.3em; font-size: 13px; }
+.win-status.error { color: #B00000; font-weight: bold; }
+.win-who { font: 20px var(--times); }
+.rank { font: bold 13px var(--sans); }
+.rank-owner { color: #CC0000; }
+.rank-admin { color: #0000CC; }
+.rank-player { color: #007A00; }
+.win-list {
+  max-height: 46vh;
+  overflow: auto;
+  background: #fff;
+  box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf;
+  padding: 3px;
+}
+.win-list table { width: 100%; border-collapse: collapse; }
+.win-list th { position: sticky; top: 0; text-align: left; background: var(--silver); box-shadow: var(--raised); padding: 4px 8px; font: bold 13px var(--sans); }
+.win-list td { padding: 4px 8px; }
