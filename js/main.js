@@ -108,6 +108,38 @@ function toast(message) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Background music: "Backroom Beat" by Sefreneth                      */
+/* ------------------------------------------------------------------ */
+
+// Browsers only allow sound after the visitor has clicked, tapped or pressed
+// a key, so the song starts on the first interaction with the page.
+const music = new Audio('assets/backroom-beat.mp3');
+music.loop = true;
+music.volume = 0.5;
+music.preload = 'auto';
+let musicOn = true;
+try { musicOn = localStorage.getItem('eehub-music') !== 'off'; } catch (e) { /* default on */ }
+
+function syncMusic() {
+  if (musicOn && !playing && !document.hidden) music.play().catch(() => {});
+  else music.pause();
+}
+
+function toggleMusic() {
+  musicOn = !musicOn;
+  try { localStorage.setItem('eehub-music', musicOn ? 'on' : 'off'); } catch (e) { /* not saved */ }
+  syncMusic();
+  toast(musicOn ? 'Music on: Backroom Beat by Sefreneth' : 'Music off');
+  if (hub) hub.rebuild();
+}
+
+['pointerdown', 'keydown'].forEach((type) => addEventListener(type, function unlock() {
+  removeEventListener(type, unlock, true);
+  syncMusic();
+}, true));
+document.addEventListener('visibilitychange', syncMusic);
+
+/* ------------------------------------------------------------------ */
 /* Game player (the games themselves are separate pages in an iframe)  */
 /* ------------------------------------------------------------------ */
 
@@ -119,6 +151,7 @@ async function openGame(game) {
   if (playing === game) return;
   const token = ++openToken;
   playing = game;
+  syncMusic();            // the game brings its own sound
   loader.show('Loading ' + game.title, nextLoadingImage());
   $('player-title').textContent = game.title;
   $('player-open').href = game.url;
@@ -142,6 +175,7 @@ function closeGame() {
   if (!playing) return;
   openToken++;
   playing = null;
+  syncMusic();
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   frame.src = 'about:blank';
   $('player').hidden = true;
@@ -178,6 +212,15 @@ for (const game of GAMES) {
   b.type = 'button';
   b.textContent = 'Play ' + game.title;
   b.addEventListener('click', () => openGame(game));
+  li.appendChild(b);
+  $('quick-list').appendChild(li);
+}
+{
+  const li = document.createElement('li');
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = 'Toggle music';
+  b.addEventListener('click', toggleMusic);
   li.appendChild(b);
   $('quick-list').appendChild(li);
 }
@@ -502,14 +545,15 @@ function startHub(logoImage) {
   }
 
   // A grey Windows 95 push button; it presses in while hovered.
-  function button(label, w, h, { size = 14 } = {}) {
+  function button(label, w, h, { size = 14, down = false } = {}) {
     const draw = (hover) => (g) => {
-      bevel(g, 0, 0, w, h, { pressed: hover });
-      fitFont(g, label, w - 16, size, SANS, 10, 'bold');
+      const pressed = hover || down;
+      bevel(g, 0, 0, w, h, { pressed });
+      fitFont(g, label, w - 12, size, SANS, 10, 'bold');
       g.fillStyle = C.ink;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      const off = hover ? 1 : 0;
+      const off = pressed ? 1 : 0;
       g.fillText(label, w / 2 + off, h / 2 + 1 + off);
     };
     const mesh = panel(w, h, draw(false));
@@ -583,8 +627,8 @@ function startHub(logoImage) {
     interactive(home, 'hud', () => scrollTo(anchors.top));
 
     let x = cw / 2;
-    const addLink = (label, w, onClick) => {
-      const mesh = button(label, w, 32);
+    const addLink = (label, w, onClick, opts) => {
+      const mesh = button(label, w, 32, opts);
       mesh.renderOrder = 102;
       mesh.position.set(x - w / 2, 0, 0);
       x -= w + 6;
@@ -594,6 +638,9 @@ function startHub(logoImage) {
     addLink('Sign In', 78, () => toast('Sign-ins are coming soon!'));
     if (W >= 480) addLink('Community', 96, () => scrollTo(anchors.community));
     addLink('Games', 70, () => scrollTo(anchors.games));
+    // Music switch: stays pressed in while the song is on.
+    if (full) addLink(musicOn ? '♪ Music: On' : '♪ Music: Off', 112, toggleMusic, { down: musicOn });
+    else addLink('♪', 34, toggleMusic, { down: musicOn, size: 17 });
   }
 
   function buildHero(y, cw, wide) {
