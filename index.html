@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Epic Entertainment HUB</title>
+<meta name="description" content="Epic Entertainment HUB — play Sefreneth's browser games in one place.">
+<meta name="theme-color" content="#16070f">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="preload" href="assets/archivo-black.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- The whole site interface is drawn in three.js on this canvas. -->
+<canvas id="stage" aria-hidden="true"></canvas>
+
+<!-- Keyboard / screen-reader route to the same actions as the 3D interface.
+     Also shown as the plain fallback if WebGL is unavailable. -->
+<nav id="quick-nav" aria-label="Games">
+  <h1>Epic Entertainment HUB</h1>
+  <p class="fallback-note">Your browser couldn't start the 3D interface, so here are the games as plain links.</p>
+  <ul id="quick-list"></ul>
+</nav>
+
+<!-- Loading screen (site boot and before each game) -->
+<div id="loader" role="status" aria-live="polite">
+  <img id="loader-img" src="assets/loading-invasion.jpg" alt="">
+  <div class="loader-shade"></div>
+  <div class="loader-card">
+    <img class="loader-logo" src="assets/logo.png" alt="">
+    <div class="loader-text">
+      <div id="loader-title">Loading the HUB</div>
+      <div class="loader-bar"><div id="loader-fill"></div></div>
+      <div id="loader-tip">Warming up the awesome…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Embedded game player -->
+<div id="player" hidden>
+  <div class="player-bar">
+    <button id="player-back" type="button">&larr; HUB</button>
+    <img src="assets/logo.png" alt="" class="player-logo">
+    <span id="player-title"></span>
+    <span class="player-spacer"></span>
+    <button id="player-full" type="button">Fullscreen</button>
+    <a id="player-open" target="_blank" rel="noopener">Open in new tab</a>
+  </div>
+  <div id="player-frame-wrap">
+    <iframe id="player-frame" title="Game" allow="fullscreen; gamepad; autoplay"></iframe>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
