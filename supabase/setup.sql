@@ -88,6 +88,12 @@ create trigger protect_rank
   before update on public.profiles
   for each row execute function public.protect_rank();
 
+-- These helpers are only for the database's own use, not for calling from the web.
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+revoke execute on function public.protect_rank() from public, anon, authenticated;
+revoke execute on function public.my_rank() from public, anon;
+grant execute on function public.my_rank() to authenticated;
+
 alter table public.profiles enable row level security;
 
 drop policy if exists "profiles are public" on public.profiles;

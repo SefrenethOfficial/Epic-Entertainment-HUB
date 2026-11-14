@@ -7,7 +7,7 @@
 // Both are meant to be public, so it is fine for them to be in this repo.
 // NEVER put the "secret" / "service_role" key here.
 //
-// While these are empty the HUB still works; sign-ups are simply switched off.
+// If these are emptied the HUB still works; sign-ups are simply switched off.
 
-export const SUPABASE_URL = '';
-export const SUPABASE_KEY = '';
+export const SUPABASE_URL = 'https://razrzyrnbivxnhesqrws.supabase.co';
+export const SUPABASE_KEY = 'sb_publishable_n_r52kh4k3r_XRnYeUNR4Q_bFsSbZ0h';
