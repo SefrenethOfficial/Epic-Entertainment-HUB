@@ -1285,8 +1285,14 @@ function startHub(logoImage) {
     updaters = [];
     hovered = null;
 
-    W = innerWidth;
-    H = innerHeight;
+    // Measure the canvas's own box, not the window. innerWidth/innerHeight can
+    // disagree with the real drawing area in some browsers (Opera GX's sidebar
+    // and GX Corner, dynamic toolbars, page zoom), which left the scene squished
+    // into the top. The canvas fills the viewport, so its client box is the truth.
+    const rect = canvas.getBoundingClientRect();
+    W = Math.round(rect.width) || canvas.clientWidth || innerWidth;
+    H = Math.round(rect.height) || canvas.clientHeight || innerHeight;
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));  // reapply: zoom can change it
     renderer.setSize(W, H, false);
     camera.aspect = W / H;
     const camZ = H / (2 * Math.tan(THREE.MathUtils.degToRad(FOV / 2)));
@@ -1406,11 +1412,26 @@ function startHub(logoImage) {
     else if (e.key === 'End') scrollTo(maxScroll);
   });
 
+  // Rebuild on any size change. We watch the canvas directly (ResizeObserver) as
+  // well as the window and the visual viewport, so a size that was wrong at first
+  // paint — or that changes when a browser panel opens or the page is zoomed —
+  // corrects itself instead of staying broken. All debounced into one rebuild.
   let resizeTimer = 0;
-  addEventListener('resize', () => {
+  let lastW = W, lastH = H;
+  const onResize = () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(build, 120);
-  });
+    resizeTimer = setTimeout(() => {
+      const r = canvas.getBoundingClientRect();
+      if (Math.round(r.width) !== lastW || Math.round(r.height) !== lastH) {
+        build();
+        lastW = W; lastH = H;
+      }
+    }, 120);
+  };
+  addEventListener('resize', onResize);
+  addEventListener('orientationchange', onResize);
+  if (window.visualViewport) visualViewport.addEventListener('resize', onResize);
+  if (window.ResizeObserver) new ResizeObserver(onResize).observe(canvas);
 
   /* ---------- render loop ---------- */
 
