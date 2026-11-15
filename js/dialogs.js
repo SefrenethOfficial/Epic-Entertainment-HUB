@@ -164,7 +164,6 @@ export function openAccount() {
     el('div', { className: 'win-actions stack' },
       me.hasEmail ? null : el('button', { type: 'button', className: 'win-btn primary', onclick: () => { dlg.close(); openAddEmail(); } }, 'Add email for leaderboards…'),
       backend.isStaff() ? el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openAddGame(); } }, 'Add a game…') : null,
-      el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openComments(); } }, 'Comments…'),
       el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openMembers(); } }, 'Members…'),
       el('button', { type: 'button', className: 'win-btn', onclick: async () => {
         await backend.signOut().catch(() => {});
@@ -333,13 +332,14 @@ function timeAgo(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-export function openComments() {
+export function openComments(game) {
+  if (!game || !game.id) return hooks.toast('Open a game to see its comments.');
   const list = el('div', { className: 'win-list comments' }, 'Loading comments…');
   const status = el('p', { className: 'win-status', role: 'alert' });
 
   async function refresh() {
     try {
-      const rows = await backend.listComments(100);
+      const rows = await backend.listComments(game.id, 100);
       if (!rows.length) {
         list.replaceChildren(el('p', { className: 'win-small' }, 'No comments yet — be the first to say something!'));
         return;
@@ -370,7 +370,7 @@ export function openComments() {
     composer = el('form', { className: 'win-form comment-form', onsubmit: (e) => {
       e.preventDefault();
       run(composer, status, 'Posting…', async () => {
-        await backend.postComment(box.value);
+        await backend.postComment(game.id, box.value);
         box.value = '';
         await refresh();
       });
@@ -381,7 +381,8 @@ export function openComments() {
     composer = el('p', { className: 'win-small' }, 'Everyone can read the comments. Sign in to post one.');
   }
 
-  const dlg = openWindow('Comments', el('div', { className: 'win-form' }, list, status, composer), 440);
+  const title = (game.title || 'Game').slice(0, 24);
+  const dlg = openWindow('Comments · ' + title, el('div', { className: 'win-form' }, list, status, composer), 440);
   refresh();
 }
 

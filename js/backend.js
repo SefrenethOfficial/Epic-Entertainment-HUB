@@ -327,21 +327,26 @@ export const MAX_COMMENT = 500;
 // Anyone can delete their own comment; Owners and Admins can delete any.
 export const canModerate = () => isStaff();
 
-// Newest comments first, with each author's username and rank. Readable signed out.
-export async function listComments(limit = 100) {
-  if (!db) return [];
+// One game's comments, newest first, with each author's username and rank.
+// Readable signed out.
+export async function listComments(gameKey, limit = 100) {
+  if (!db || !gameKey) return [];
   const { data, error } = await db.from('hub_comments')
-    .select('id, body, created_at, user_id, username, rank').limit(limit);
+    .select('id, body, game_key, created_at, user_id, username, rank')
+    .eq('game_key', String(gameKey))
+    .order('created_at', { ascending: false })
+    .limit(limit);
   if (error) throw fail(error);
   return data || [];
 }
 
-export async function postComment(body) {
+export async function postComment(gameKey, body) {
   need();
   if (!me) throw new Error('Sign in to post a comment.');
+  if (!gameKey) throw new Error('Open a game to comment on it.');
   body = (body || '').trim();
   if (!body) throw new Error('Write something first.');
-  const { error } = await db.from('comments').insert({ user_id: me.id, body: body.slice(0, MAX_COMMENT) });
+  const { error } = await db.from('comments').insert({ user_id: me.id, game_key: String(gameKey), body: body.slice(0, MAX_COMMENT) });
   if (error) throw fail(error);
 }
 

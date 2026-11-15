@@ -387,15 +387,17 @@ create or replace view public.hub_board_alltime with (security_invoker = true) a
 grant select on public.hub_board_weekly, public.hub_board_alltime to anon, authenticated;
 
 -- ---------------------------------------------------------------- comments
--- A global comment wall. Everyone can read; signed-in players post; authors and
--- staff (Owner/Admin) can delete.
+-- Per-game comments: each comment is tagged with game_key (a game's id). Everyone
+-- can read; signed-in players post; authors and staff (Owner/Admin) can delete.
 create table if not exists public.comments (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references public.profiles (id) on delete cascade,
+  game_key   text,
   body       text not null check (char_length(body) between 1 and 500),
   created_at timestamptz not null default now()
 );
-create index if not exists comments_created_idx on public.comments (created_at desc);
+alter table public.comments add column if not exists game_key text;
+create index if not exists comments_game_idx on public.comments (game_key, created_at desc);
 
 alter table public.comments enable row level security;
 
@@ -412,13 +414,12 @@ create policy "delete own or staff" on public.comments
   using (user_id = auth.uid() or public.my_rank() in ('owner', 'admin'));
 
 grant select on public.comments to anon, authenticated;
-grant insert (user_id, body) on public.comments to authenticated;
+grant insert (user_id, body, game_key) on public.comments to authenticated;
 grant delete on public.comments to authenticated;
 
-create or replace view public.hub_comments with (security_invoker = true) as
-  select c.id, c.body, c.created_at, c.user_id, p.username, p.rank
+drop view if exists public.hub_comments;
+create view public.hub_comments with (security_invoker = true) as
+  select c.id, c.body, c.game_key, c.created_at, c.user_id, p.username, p.rank
     from public.comments c
-    join public.profiles p on p.id = c.user_id
-   order by c.created_at desc
-   limit 200;
+    join public.profiles p on p.id = c.user_id;
 grant select on public.hub_comments to anon, authenticated;

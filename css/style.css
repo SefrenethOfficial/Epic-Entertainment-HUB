@@ -204,6 +204,7 @@ body.no-webgl #quick-list button { position: static; width: 100%; text-align: le
 @media (max-width: 520px) {
   #player-open { display: none; }
   .player-logo { display: none; }
+  #player-comments .btn-label { display: none; }
 }
 
 /* ---------- toast (a Windows tooltip) ---------- */
