@@ -210,6 +210,8 @@ async function openGame(game) {
   const token = ++openToken;
   playing = game;
   syncMusic();            // the game brings its own sound
+  backend.recordPlay(game.id);        // count this play (built-in or added)
+  game.plays = (game.plays || 0) + 1;
   if (backend.me) {
     backend.reportVariety(game.id);   // first play of this game today earns a bonus
     startActiveTracking();
@@ -258,8 +260,9 @@ function closeGame() {
   openToken++;
   playing = null;
   stopActiveTracking();
-  // Bank the last of the play time, then refresh stats + board.
+  // Bank the last of the play time, then refresh stats + board + play counts.
   flushActiveTime().then(() => { if (backend.configured) refreshBoard(); });
+  if (backend.configured) refreshGames();   // pick up the new play count + re-sort
   syncMusic();
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   frame.src = 'about:blank';
@@ -315,13 +318,13 @@ function openAccountOrAuth(mode = 'in') {
   else toast('Sign-ups are coming soon!');
 }
 
-// Reload the list of HUB-added games and redraw.
+// Reload the list of HUB-added games, apply play counts, sort most-played first.
 async function refreshGames() {
-  try {
-    allGames = [...GAMES, ...(await backend.listGames())];
-  } catch (err) {
-    console.error('Could not load added games', err);
-  }
+  let added = [], counts = {};
+  try { [added, counts] = await Promise.all([backend.listGames(), backend.listPlayCounts()]); } catch (err) { console.error('Could not load games', err); }
+  allGames = [...GAMES, ...added];
+  for (const g of allGames) g.plays = counts[g.id] || 0;
+  allGames.sort((a, b) => b.plays - a.plays);   // most played rises to the top
   renderQuickList();
   if (hub) hub.rebuild();
 }
@@ -1016,10 +1019,13 @@ function startHub(logoImage) {
         card.position.y = baseY + (REDUCED ? 0 : Math.sin(t * 1.1 + i * 1.7) * 3);
       });
       interactive(card, 'page', (hit) => {
-        // The window's close box removes a HUB-added game (Owners and Admins only).
+        // Title-bar buttons for staff: ✎ edits, × removes a HUB-added game.
         if (game.removable && backend.isStaff() && hit && hit.uv) {
           const px = hit.uv.x * cardW, py = (1 - hit.uv.y) * cardH;
-          if (px > cardW - 42 && py < 34) return removeGameFlow(game);
+          if (py < 34) {
+            if (px > cardW - 42) return removeGameFlow(game);
+            if (px > cardW - 66) return dialogs.openEditGame(game);
+          }
         }
         openGame(game);
       }, (on, hit) => {
@@ -1060,10 +1066,11 @@ function startHub(logoImage) {
     g.fillStyle = '#ffffff';
     fitFont(g, game.title + '.exe', bw - 100, 14, SANS, 10, 'bold');
     g.fillText(game.title + '.exe', 12, 20);
-    ['_', '□', '×'].forEach((glyph, i) => {
+    const staffCtl = game.removable && backend.isStaff();   // edit + close buttons for staff
+    ['_', staffCtl ? '✎' : '□', '×'].forEach((glyph, i) => {
       const bx = bw - 10 - (3 - i) * 22 + (i === 2 ? 2 : 0), by = 9;
       bevel(g, bx, by, 20, 20, { t: 1 });
-      g.fillStyle = i === 2 && game.removable && backend.isStaff() ? '#C00000' : C.ink;
+      g.fillStyle = (i === 2 && staffCtl) ? '#C00000' : (i === 1 && staffCtl) ? '#000080' : C.ink;
       g.font = `bold 13px ${SANS}`;
       g.textAlign = 'center';
       g.fillText(glyph, bx + 10, by + (glyph === '_' ? 7 : 11));
@@ -1102,13 +1109,23 @@ function startHub(logoImage) {
     const lines = wrapLines(g, game.description || '', bw - 32, 3);
     drawLines(g, lines, 16, ay + artH + 62, 21);
 
+    // play count, right-aligned on the tags row
+    const plays = game.plays || 0;
+    g.textAlign = 'right';
+    g.font = `bold 14px ${SANS}`;
+    g.fillStyle = '#1f6b2a';
+    const playLabel = '▶ ' + plays.toLocaleString() + (plays === 1 ? ' play' : ' plays');
+    g.fillText(playLabel, bw - 16, ay + artH + 132);
+    const playW = g.measureText(playLabel).width;
+
     // tags, styled as old-school links
     let tx = 16;
     const ty = ay + artH + 134;
+    g.textAlign = 'left';
     g.font = `15px ${TIMES}`;
     for (const tag of (game.tags || []).slice(0, 3)) {
       const tw = g.measureText(tag).width;
-      if (tx + tw > bw - 16) break;
+      if (tx + tw > bw - 24 - playW) break;
       g.fillStyle = C.link;
       g.fillText(tag, tx, ty);
       g.fillRect(tx, ty + 2, tw, 1);

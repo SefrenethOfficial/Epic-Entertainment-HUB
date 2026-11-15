@@ -282,3 +282,32 @@ create or replace view public.hub_board_alltime with (security_invoker = true) a
   where xp > 0 order by xp desc, username limit 100;
 
 grant select on public.hub_board_weekly, public.hub_board_alltime to anon, authenticated;
+
+-- ------------------------------------------------------- play counts + edit
+-- Play counts for every game (built-in and HUB-added), keyed by its id string.
+create table if not exists public.play_counts (
+  game_key text primary key,
+  plays int not null default 0
+);
+alter table public.play_counts enable row level security;
+drop policy if exists "play counts public" on public.play_counts;
+create policy "play counts public" on public.play_counts for select using (true);
+grant select on public.play_counts to anon, authenticated;
+
+create or replace function public.hub_play(p_key text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_key is null or length(p_key) = 0 or length(p_key) > 64 then return; end if;
+  insert into public.play_counts (game_key, plays) values (p_key, 1)
+  on conflict (game_key) do update set plays = play_counts.plays + 1;
+end; $$;
+revoke execute on function public.hub_play(text) from public;
+grant execute on function public.hub_play(text) to anon, authenticated;
+
+-- Owners and Admins can edit a game's details after it's made.
+drop policy if exists "staff edit games" on public.games;
+create policy "staff edit games" on public.games
+  for update to authenticated
+  using (public.my_rank() in ('owner', 'admin'))
+  with check (public.my_rank() in ('owner', 'admin'));
+grant update (title, description, tags, url, image_path) on public.games to authenticated;

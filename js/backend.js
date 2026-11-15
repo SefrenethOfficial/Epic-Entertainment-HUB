@@ -243,6 +243,54 @@ export async function removeGame(game) {
   if (game.imagePath) db.storage.from('game-images').remove([game.imagePath]).catch(() => {});
 }
 
+const IMG_EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' };
+
+// Edit an existing HUB-added game (Owners/Admins). Fields: title, description,
+// tags[], url (link games only), imageFile (optional replacement picture).
+export async function editGame(game, { title, description, tags, url, imageFile }) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can edit games.');
+  if (!title.trim()) throw new Error('Give the game a title.');
+  const patch = { title: title.trim().slice(0, 40), description: description.trim().slice(0, 200), tags: tags.slice(0, 3) };
+  if (game.url) {   // a link game: the URL can be changed (uploaded games keep their file)
+    if (!/^https:\/\/\S+$/.test((url || '').trim())) throw new Error('The link has to start with https://');
+    patch.url = url.trim();
+  }
+  if (imageFile) {
+    if (!IMAGE_TYPES.includes(imageFile.type)) throw new Error('The picture has to be a PNG, JPG, WebP or GIF.');
+    if (imageFile.size > MAX_IMAGE_BYTES) throw new Error('The picture is over 2 MB.');
+  }
+  let newImage = null;
+  try {
+    if (imageFile) { newImage = await upload('game-images', imageFile, randomName(IMG_EXT[imageFile.type]), imageFile.type); patch.image_path = newImage; }
+    const { data, error } = await db.from('games').update(patch).eq('id', game.rowId).select().single();
+    if (error) throw fail(error);
+    if (newImage && game.imagePath) db.storage.from('game-images').remove([game.imagePath]).catch(() => {});
+    return toGame(data);
+  } catch (err) {
+    if (newImage) db.storage.from('game-images').remove([newImage]).catch(() => {});
+    throw err;
+  }
+}
+
+/* ------------------------------ play counts ---------------------------- */
+
+// Map of game key -> play count, for sorting the list. Readable signed out.
+export async function listPlayCounts() {
+  if (!db) return {};
+  const { data, error } = await db.from('play_counts').select('game_key, plays');
+  if (error) return {};
+  const m = {};
+  for (const r of data) m[r.game_key] = r.plays;
+  return m;
+}
+
+// Register one play of a game (built-in or added). Anyone can, best-effort.
+export async function recordPlay(gameKey) {
+  if (!db || !gameKey) return;
+  await db.rpc('hub_play', { p_key: String(gameKey) }).then(() => {}, () => {});
+}
+
 /* --------------------------- XP & leaderboard -------------------------- */
 
 // Fetch the top players. scope is 'week' or 'all'. Readable even signed out.

@@ -250,6 +250,40 @@ export function openAddGame() {
   title.focus();
 }
 
+export function openEditGame(game) {
+  if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can edit games.');
+  const title = el('input', { type: 'text', required: true, maxLength: 40, value: game.title || '' });
+  const description = el('textarea', { rows: 2, maxLength: 200, value: game.description || '' });
+  const tags = el('input', { type: 'text', maxLength: 60, value: (game.tags || []).join(', ') });
+  const url = el('input', { type: 'url', placeholder: 'https://…', value: game.url || '' });
+  const image = el('input', { type: 'file', accept: backend.IMAGE_TYPES.join(',') });
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  const isLink = Boolean(game.url);
+
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Saving…', async () => {
+      const tagList = tags.value.split(',').map((t) => t.trim().slice(0, 16)).filter(Boolean).slice(0, 3);
+      await backend.editGame(game, { title: title.value, description: description.value, tags: tagList, url: url.value, imageFile: image.files[0] || null });
+      dlg.close();
+      hooks.toast('Saved changes to ' + title.value.trim() + '.');
+      hooks.gamesChanged();
+    });
+  } },
+    field('Title', title),
+    field('Description', description),
+    field('Tags', tags, 'Up to 3, separated by commas'),
+    isLink ? field('Game link', url, 'Where the game is hosted') : null,
+    field('Replace picture (optional)', image, 'Leave empty to keep the current one'),
+    status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel'),
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Save')),
+  );
+  const dlg = openWindow('Edit Game', form, 420);
+  title.focus();
+}
+
 /* -------------------------------- confirm -------------------------------- */
 
 export function confirmWindow(message, okLabel = 'OK') {
