@@ -80,30 +80,40 @@ const faceTex = tile(128, (g, s) => {
   g.beginPath(); g.arc(s * 0.5, s * 0.52, s * 0.22, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
 });
 
-// Returns { group, limbs } so the player avatar can be animated.
+// Classic Roblox R6 proportions, in studs:
+//   torso 2w x 2h x 1d · arms & legs each 1 x 2 x 1 · head ~1.25 cube · 5 tall.
+// One stud = U world units, so the whole character is ~1.8 tall.
+const U = 0.34;
 function buildNoob(shirt) {
   const group = new THREE.Group();
   const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
   const skin = mat(NOOB.skin), torsoMat = mat(shirt === undefined ? NOOB.torso : shirt), legMat = mat(NOOB.legs);
-  const add = (mesh, cast = true) => { mesh.castShadow = cast; group.add(mesh); return mesh; };
+
+  const legH = 2 * U, torsoH = 2 * U, torsoW = 2 * U, torsoD = 1 * U, limbT = 1 * U;
+  const hipY = legH;               // top of legs / bottom of torso
+  const shoulderY = legH + torsoH; // top of torso
+  const headS = 1.25 * U;
+
+  // torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(torsoW, torsoH, torsoD), torsoMat);
+  torso.position.y = hipY + torsoH / 2; torso.castShadow = true; group.add(torso);
 
   // head with a face on the front (+z)
   const headMats = [skin, skin, skin, skin, new THREE.MeshLambertMaterial({ map: faceTex }), skin];
-  const head = add(new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.56, 0.56), headMats));
-  head.position.y = 1.62;
-  // torso
-  add(new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.62, 0.36), torsoMat)).position.y = 1.0;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(headS, headS, headS), headMats);
+  head.position.y = shoulderY + headS / 2; head.castShadow = true; group.add(head);
 
-  // limbs pivot at shoulder/hip so they can swing
-  function limb(px, py, w, h, d, m) {
+  // limbs: square 1x1 cross-section, 2 tall, pivoting at shoulder/hip so they swing
+  function limb(px, py, m) {
     const pivot = new THREE.Group(); pivot.position.set(px, py, 0);
-    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); box.position.y = -h / 2; box.castShadow = true;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(limbT, 2 * U, limbT), m);
+    box.position.y = -U; box.castShadow = true;
     pivot.add(box); group.add(pivot); return pivot;
   }
-  const larm = limb(-0.49, 1.3, 0.26, 0.62, 0.3, skin);
-  const rarm = limb(0.49, 1.3, 0.26, 0.62, 0.3, skin);
-  const lleg = limb(-0.18, 0.68, 0.3, 0.68, 0.32, legMat);
-  const rleg = limb(0.18, 0.68, 0.3, 0.68, 0.32, legMat);
+  const larm = limb(-(torsoW / 2 + limbT / 2), shoulderY, skin);
+  const rarm = limb(torsoW / 2 + limbT / 2, shoulderY, skin);
+  const lleg = limb(-limbT / 2, hipY, legMat);
+  const rleg = limb(limbT / 2, hipY, legMat);
   return { group, limbs: { larm, rarm, lleg, rleg } };
 }
 
