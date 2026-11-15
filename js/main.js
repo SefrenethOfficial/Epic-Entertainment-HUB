@@ -769,6 +769,7 @@ function startHub(logoImage) {
     } else {
       addLink('Sign In', 78, () => openAccountOrAuth('in'));
     }
+    addLink('Request', 96, () => window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'));
     if (W >= 480) addLink('Scores', 78, () => scrollTo(anchors.board));
     addLink('Games', 70, () => scrollTo(anchors.games));
     // Music switch: stays pressed in while the song is on.
