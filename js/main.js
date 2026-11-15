@@ -900,7 +900,7 @@ function startHub(logoImage) {
       g.textAlign = align;
       g.font = `19px ${TIMES}`;
       g.fillStyle = '#ffffff';
-      const lines = wrapLines(g, 'Every Sefreneth game in one place! Pick one and play it right here. ' + (backend.configured ? 'Sign up for a profile and a rank!' : 'Profiles, ranks and community-made games are coming soon.'), Math.min(w, 560), 4);
+      const lines = wrapLines(g, 'Awesome epic tuff games right here folks yes yes! Pick one and play it right here. ' + (backend.configured ? 'Sign up for a profile and a rank!' : 'Profiles, ranks and community-made games are coming soon.'), Math.min(w, 560), 4);
       drawLines(g, lines, ax, base + 44, 25);
     });
     place(text, textCx, textTop, th);
