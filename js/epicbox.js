@@ -6,6 +6,7 @@
 // an open sandbox, there's no end.
 
 import * as THREE from '../vendor/three.module.min.js';
+import { GLTFLoader } from '../vendor/GLTFLoader.js';
 
 const GRID = 64;          // baseplate is GRID x GRID studs
 const HALF = GRID / 2;
@@ -148,9 +149,10 @@ const parts = new Map();
 let spawn = null;
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+const cylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 24);
 function partMesh(p) {
   if (p.kind === 'block') {
-    const m = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: p.color }));
+    const m = new THREE.Mesh(p.shape === 'cylinder' ? cylGeo : boxGeo, new THREE.MeshLambertMaterial({ color: p.color }));
     m.castShadow = true; m.receiveShadow = true;
     return m;
   }
@@ -171,9 +173,9 @@ function cellFree(x, y, z, ignore) {
   return true;
 }
 
-function addBlock(color, x, y, z) {
+function addBlock(color, x, y, z, shape) {
   if (!inBounds(x, z) || y < 0 || !cellFree(x, y, z)) return null;
-  const p = { id: nextId++, kind: 'block', type: 'block', color, x, y, z, sx: 1, sy: 1, sz: 1 };
+  const p = { id: nextId++, kind: 'block', type: 'block', color, shape: shape || 'box', x, y, z, sx: 1, sy: 1, sz: 1 };
   p.mesh = partMesh(p); positionMesh(p); worldGroup.add(p.mesh); parts.set(p.id, p);
   return p;
 }
@@ -313,8 +315,13 @@ function axisParam(point, dir) {
 /* Tools                                                               */
 /* ------------------------------------------------------------------ */
 
-let tool = { mode: 'block', color: COLORS[5][1], id: 'blue' };   // default: place blue blocks
-function selectTool(t) { tool = t; document.querySelectorAll('.pal-item').forEach((b) => b.classList.toggle('on', b.dataset.key === t.key)); }
+let tool = { mode: 'block', color: COLORS[5][1], key: 'c-blue' };   // default: place blue boxes
+let shape = 'box';
+let curColor = COLORS[5][1], curColorKey = 'c-blue';
+function selectTool(t) { tool = t; document.querySelectorAll('.pal-item:not(.pal-shape)').forEach((b) => b.classList.toggle('on', b.dataset.key === t.key)); }
+function highlightShape() { document.querySelectorAll('.pal-shape').forEach((b) => b.classList.toggle('on', b.dataset.shape === shape)); }
+function setShape(s) { shape = s; highlightShape(); selectTool({ mode: 'block', color: curColor, key: curColorKey }); }
+function pickColor(col, key) { curColor = col; curColorKey = key; selectTool({ mode: 'block', color: col, key }); }
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */
@@ -375,7 +382,7 @@ function clickEdit(cx, cy) {
   if (hitPart && hitPart.kind === 'block' && tool.mode === 'block') { select(hitPart); return; }
   const t = pickPlace(cx, cy);
   if (!t) return;
-  const p = tool.mode === 'block' ? addBlock(tool.color, t.x, t.y, t.z) : addObject(tool.type, t.x, t.y, t.z);
+  const p = tool.mode === 'block' ? addBlock(tool.color, t.x, t.y, t.z, shape) : addObject(tool.type, t.x, t.y, t.z);
   if (p && p.kind === 'block') select(p);   // auto-select so you can stretch immediately
 }
 
@@ -386,13 +393,18 @@ function clickEdit(cx, cy) {
 function hex(n) { return '#' + n.toString(16).padStart(6, '0'); }
 function buildPalette() {
   const wrap = $('palette'); wrap.innerHTML = '';
+  wrap.appendChild(head('Tools'));
   const tools = document.createElement('div'); tools.className = 'pal-row';
-  const selBtn = mkItem('select', 'Select / Stretch', 'linear-gradient(135deg,#ff4d4d,#4dff6a,#4d8bff)', () => selectTool({ mode: 'select', key: 'select' }));
-  tools.appendChild(selBtn); wrap.appendChild(head('Tools')); wrap.appendChild(tools);
+  const selBtn = mkItem('select', 'Select', 'linear-gradient(135deg,#ff4d4d,#4dff6a,#4d8bff)', () => selectTool({ mode: 'select', key: 'select' }));
+  const boxBtn = mkItem('box', 'Box', '#cfd3d8', () => setShape('box'));
+  const circBtn = mkItem('circle', 'Circle', 'radial-gradient(circle at 50% 50%,#cfd3d8 58%,transparent 60%)', () => setShape('cylinder'));
+  boxBtn.classList.add('pal-shape'); boxBtn.dataset.shape = 'box';
+  circBtn.classList.add('pal-shape'); circBtn.dataset.shape = 'cylinder';
+  tools.append(selBtn, boxBtn, circBtn); wrap.appendChild(tools);
 
   wrap.appendChild(head('Part colours'));
   const crow = document.createElement('div'); crow.className = 'pal-row';
-  for (const [name, col] of COLORS) crow.appendChild(mkItem('c-' + name, name, hex(col), () => selectTool({ mode: 'block', color: col, key: 'c-' + name })));
+  for (const [name, col] of COLORS) crow.appendChild(mkItem('c-' + name, name, hex(col), () => pickColor(col, 'c-' + name)));
   wrap.appendChild(crow);
 
   wrap.appendChild(head('Objects'));
@@ -402,7 +414,7 @@ function buildPalette() {
   orow.appendChild(mkItem('erase', 'Eraser', 'repeating-linear-gradient(45deg,#fff,#fff 3px,#f99 3px,#f99 6px)', () => selectTool({ mode: 'erase', key: 'erase' })));
   wrap.appendChild(orow);
 
-  selectTool({ mode: 'block', color: COLORS[5][1], key: 'c-blue' });
+  pickColor(COLORS[5][1], 'c-blue'); highlightShape();
 }
 function head(t) { const h = document.createElement('div'); h.className = 'pal-group'; h.textContent = t; return h; }
 function mkItem(key, label, bg, onClick) {
@@ -416,7 +428,25 @@ function mkItem(key, label, bg, onClick) {
 /* ------------------------------------------------------------------ */
 
 const player = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), hw: 0.32, height: 1.8, grounded: false, yaw: 0, coins: 0, walk: 0 };
-const noob = buildNoob(); noob.group.visible = false; scene.add(noob.group);
+
+// The avatar: the uploaded GLB character if it loads, otherwise a built noob.
+// The GLB is a single static mesh (no skeleton), so it can't swing limbs — it
+// gets a procedural walk bounce + lean instead.
+const avatar = new THREE.Group(); avatar.visible = false; scene.add(avatar);
+const noob = buildNoob(); avatar.add(noob.group);
+let charMode = 'noob';           // 'glb' once the model loads
+let glbHolder = null;
+new GLTFLoader().load('assets/character.glb', (gltf) => {
+  const model = gltf.scene;
+  let bb = new THREE.Box3().setFromObject(model); const sz = new THREE.Vector3(); bb.getSize(sz);
+  model.scale.setScalar(1.8 / (sz.y || 1));
+  bb = new THREE.Box3().setFromObject(model);
+  model.position.set(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.material = new THREE.MeshLambertMaterial({ color: 0xc2c6ca }); } });
+  glbHolder = new THREE.Group(); glbHolder.add(model); avatar.add(glbHolder);
+  noob.group.visible = false; charMode = 'glb';
+}, undefined, () => { /* keep the built noob */ });
+
 const keys = {};
 let pdrag = null;
 addEventListener('keydown', (e) => { keys[e.code] = true; if (mode === 'play' && (e.code === 'Space' || e.code.startsWith('Arrow'))) e.preventDefault(); });
@@ -426,6 +456,8 @@ function collide(axis) {
   const p = player.pos, hw = player.hw, h = player.height;
   const minX = p.x - hw, maxX = p.x + hw, minY = p.y, maxY = p.y + h, minZ = p.z - hw, maxZ = p.z + hw;
   let fix = null, bouncer = false;
+  // the baseplate itself is solid ground at y=0 (stops you clipping through it)
+  if (axis === 'y' && player.vel.y <= 0 && p.x > -HALF && p.x < HALF && p.z > -HALF && p.z < HALF) fix = 0;
   for (const part of solidParts()) {
     const x0 = part.x, x1 = part.x + part.sx, y0 = part.y, y1 = part.y + part.sy, z0 = part.z, z1 = part.z + part.sz;
     if (maxX <= x0 || minX >= x1 || maxY <= y0 || minY >= y1 || maxZ <= z0 || minZ >= z1) continue;
@@ -444,10 +476,10 @@ function enterPlay() {
   if (mode === 'play') return;
   deselect(); mode = 'play'; player.coins = 0;
   for (const p of parts.values()) if (p.kind === 'coin') p.mesh.visible = true;
-  respawn(); noob.group.visible = true;
+  respawn(); avatar.visible = true;
   document.body.classList.add('playing'); $('hud-coins').textContent = 'Coins: 0';
 }
-function exitPlay() { mode = 'edit'; noob.group.visible = false; document.body.classList.remove('playing'); applyOrbit(); }
+function exitPlay() { mode = 'edit'; avatar.visible = false; document.body.classList.remove('playing'); applyOrbit(); }
 
 function stepPlay(dt) {
   dt = Math.min(dt, 0.033);
@@ -461,7 +493,7 @@ function stepPlay(dt) {
   const moving = ix || iz; const len = Math.hypot(ix, iz) || 1;
   const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
   player.vel.x = moving ? ((ix / len) * cosY - (iz / len) * sinY) * speed : 0;
-  player.vel.z = moving ? ((ix / len) * sinY + (iz / len) * cosY) * speed : 0;
+  player.vel.z = moving ? (-(ix / len) * sinY - (iz / len) * cosY) * speed : 0;   // W = into the screen
   player.vel.y -= 26 * dt;
   if (keys['Space'] && player.grounded) { player.vel.y = 9.6; player.grounded = false; }
 
@@ -480,12 +512,19 @@ function stepPlay(dt) {
     }
   }
 
-  noob.group.position.copy(player.pos);
-  if (moving) noob.group.rotation.y = Math.atan2(player.vel.x, player.vel.z);
+  avatar.position.copy(player.pos);
+  if (moving) avatar.rotation.y = Math.atan2(player.vel.x, player.vel.z);
   player.walk += dt * (moving ? (run > 1 ? 14 : 9) : 6);
-  const sw = Math.sin(player.walk) * (moving ? 0.5 : 0.08);
-  noob.limbs.lleg.rotation.x = sw; noob.limbs.rleg.rotation.x = -sw;
-  noob.limbs.larm.rotation.x = -sw; noob.limbs.rarm.rotation.x = sw;
+  if (charMode === 'noob') {
+    const sw = Math.sin(player.walk) * (moving ? 0.5 : 0.08);
+    noob.limbs.lleg.rotation.x = sw; noob.limbs.rleg.rotation.x = -sw;
+    noob.limbs.larm.rotation.x = -sw; noob.limbs.rarm.rotation.x = sw;
+  } else if (glbHolder) {
+    // no skeleton on the model, so fake a walk with a bounce + slight lean
+    const amp = moving ? (run > 1 ? 0.15 : 0.1) : 0.02;
+    glbHolder.position.y = Math.abs(Math.sin(player.walk)) * amp;
+    glbHolder.rotation.x = moving ? 0.07 : 0;
+  }
 
   const camDist = 6.2, camH = 3.2;
   camera.position.set(player.pos.x - Math.sin(player.yaw) * camDist, player.pos.y + camH, player.pos.z - Math.cos(player.yaw) * camDist);
