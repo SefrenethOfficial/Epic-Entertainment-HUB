@@ -336,6 +336,7 @@ export function openComments(game) {
   if (!game || !game.id) return hooks.toast('Open a game to see its comments.');
   const list = el('div', { className: 'win-list comments' }, 'Loading comments…');
   const status = el('p', { className: 'win-status', role: 'alert' });
+  let changed = false;   // did the count change? refresh the card badges on close
 
   async function refresh() {
     try {
@@ -352,7 +353,7 @@ export function openComments(game) {
           el('span', { className: 'comment-time' }, timeAgo(c.created_at)),
           (canMod || c.user_id === mine)
             ? el('button', { type: 'button', className: 'comment-del', ariaLabel: 'Delete comment', title: 'Delete', onclick: async () => {
-                try { await backend.deleteComment(c.id); refresh(); }
+                try { await backend.deleteComment(c.id); changed = true; refresh(); }
                 catch (err) { status.className = 'win-status error'; status.textContent = err.message; }
               } }, '×')
             : null),
@@ -372,6 +373,7 @@ export function openComments(game) {
       run(composer, status, 'Posting…', async () => {
         await backend.postComment(game.id, box.value);
         box.value = '';
+        changed = true;
         await refresh();
       });
     } },
@@ -383,6 +385,7 @@ export function openComments(game) {
 
   const title = (game.title || 'Game').slice(0, 24);
   const dlg = openWindow('Comments · ' + title, el('div', { className: 'win-form' }, list, status, composer), 440);
+  dlg.addEventListener('close', () => { if (changed) hooks.gamesChanged(); });
   refresh();
 }
 

@@ -322,10 +322,10 @@ function openAccountOrAuth(mode = 'in') {
 
 // Reload the list of HUB-added games, apply play counts, sort most-played first.
 async function refreshGames() {
-  let added = [], counts = {};
-  try { [added, counts] = await Promise.all([backend.listGames(), backend.listPlayCounts()]); } catch (err) { console.error('Could not load games', err); }
+  let added = [], counts = {}, comments = {};
+  try { [added, counts, comments] = await Promise.all([backend.listGames(), backend.listPlayCounts(), backend.listCommentCounts()]); } catch (err) { console.error('Could not load games', err); }
   allGames = [...GAMES, ...added];
-  for (const g of allGames) g.plays = counts[g.id] || 0;
+  for (const g of allGames) { g.plays = counts[g.id] || 0; g.comments = comments[g.id] || 0; }
   allGames.sort((a, b) => b.plays - a.plays);   // most played rises to the top
   renderQuickList();
   if (hub) hub.rebuild();
@@ -1021,12 +1021,16 @@ function startHub(logoImage) {
         card.position.y = baseY + (REDUCED ? 0 : Math.sin(t * 1.1 + i * 1.7) * 3);
       });
       interactive(card, 'page', (hit) => {
-        // Title-bar buttons for staff: ✎ edits, × removes a HUB-added game.
-        if (game.removable && backend.isStaff() && hit && hit.uv) {
+        if (hit && hit.uv) {
           const px = hit.uv.x * cardW, py = (1 - hit.uv.y) * cardH;
           if (py < 34) {
-            if (px > cardW - 42) return removeGameFlow(game);
-            if (px > cardW - 66) return dialogs.openEditGame(game);
+            // comment pill (everyone): opens this game's comments
+            if (backend.configured && px >= cardW - 136 && px <= cardW - 90) return dialogs.openComments(game);
+            // staff title-bar buttons: ✎ edits, × removes a HUB-added game
+            if (game.removable && backend.isStaff()) {
+              if (px > cardW - 42) return removeGameFlow(game);
+              if (px > cardW - 66) return dialogs.openEditGame(game);
+            }
           }
         }
         openGame(game);
@@ -1066,7 +1070,7 @@ function startHub(logoImage) {
     g.textAlign = 'left';
     g.textBaseline = 'middle';
     g.fillStyle = '#ffffff';
-    fitFont(g, game.title + '.exe', bw - 100, 14, SANS, 10, 'bold');
+    fitFont(g, game.title + '.exe', bw - 156, 14, SANS, 10, 'bold');
     g.fillText(game.title + '.exe', 12, 20);
     const staffCtl = game.removable && backend.isStaff();   // edit + close buttons for staff
     ['_', staffCtl ? '✎' : '□', '×'].forEach((glyph, i) => {
@@ -1077,6 +1081,17 @@ function startHub(logoImage) {
       g.textAlign = 'center';
       g.fillText(glyph, bx + 10, by + (glyph === '_' ? 7 : 11));
     });
+    // comment pill (everyone): shows this game's comment count, opens its thread
+    if (backend.configured) {
+      const pillW = 46, pillX = bw - 10 - 3 * 22 - 6 - pillW, pillY = 9;
+      bevel(g, pillX, pillY, pillW, 20, { t: 1 });
+      g.fillStyle = C.ink;
+      g.font = `bold 12px ${SANS}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('💬 ' + (game.comments || 0), pillX + pillW / 2, pillY + 11);
+      g.textBaseline = 'alphabetic';
+    }
 
     // artwork in a sunken frame, drawn chunky like an old GIF
     const ax = 12, ay = 40, aw = bw - 24;

@@ -340,6 +340,16 @@ export async function listComments(gameKey, limit = 100) {
   return data || [];
 }
 
+// Map of game key -> comment count, for the badge on each game card.
+export async function listCommentCounts() {
+  if (!db) return {};
+  const { data, error } = await db.from('hub_comment_counts').select('game_key, n');
+  if (error) return {};
+  const m = {};
+  for (const r of data) m[r.game_key] = r.n;
+  return m;
+}
+
 export async function postComment(gameKey, body) {
   need();
   if (!me) throw new Error('Sign in to post a comment.');

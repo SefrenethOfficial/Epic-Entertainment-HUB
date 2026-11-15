@@ -423,3 +423,11 @@ create view public.hub_comments with (security_invoker = true) as
     from public.comments c
     join public.profiles p on p.id = c.user_id;
 grant select on public.hub_comments to anon, authenticated;
+
+-- How many comments each game has, for the count shown on the game cards.
+create or replace view public.hub_comment_counts with (security_invoker = true) as
+  select game_key, count(*)::int as n
+    from public.comments
+   where game_key is not null
+   group by game_key;
+grant select on public.hub_comment_counts to anon, authenticated;
