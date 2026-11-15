@@ -330,9 +330,3 @@ dialog.win::backdrop { background: rgba(0, 0, 32, .55); }
 .win-list td { padding: 4px 8px; }
 
 .win-stats { font: 14px var(--sans); color: #000; background: #fff; padding: 7px 9px; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf; }
-
-/* ---------- auth: "or" divider + Google button ---------- */
-.win-or { display: flex; align-items: center; gap: 8px; margin: 2px 0; color: #555; font: 12px var(--sans); }
-.win-or::before, .win-or::after { content: ""; flex: 1; height: 1px; background: #808080; box-shadow: 0 1px #fff; }
-.win-btn.google { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: bold; }
-.win-btn.google::before { content: "G"; display: inline-grid; place-items: center; width: 18px; height: 18px; background: #fff; color: #4285F4; border: 1px solid #808080; font: bold 13px Arial, sans-serif; }

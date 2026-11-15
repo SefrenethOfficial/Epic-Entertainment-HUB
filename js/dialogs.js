@@ -110,11 +110,6 @@ export function openAuth(startWith = 'in') {
     passField,
     status,
     el('div', { className: 'win-actions' }, submit),
-    el('div', { className: 'win-or' }, el('span', {}, 'or')),
-    el('button', {
-      type: 'button', className: 'win-btn google',
-      onclick: () => run(form, status, 'Redirecting to Google…', async () => { await backend.signInWithGoogle(); }),
-    }, 'Sign in with Google'),
   );
   const dlg = openWindow('Epic Entertainment HUB - Account', form);
   setMode(mode);
