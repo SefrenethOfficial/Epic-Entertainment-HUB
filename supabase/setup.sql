@@ -166,3 +166,119 @@ drop policy if exists "hub staff delete uploads" on storage.objects;
 create policy "hub staff delete uploads" on storage.objects
   for delete to authenticated
   using (bucket_id in ('game-files', 'game-images') and public.my_rank() in ('owner', 'admin'));
+
+-- ------------------------------------------------------------- leaderboard
+-- XP is the number the leaderboard ranks on. Diamonds are a spendable currency
+-- for the future shop. Only signed-in players earn or appear on the board.
+alter table public.profiles
+  add column if not exists xp int not null default 0,
+  add column if not exists weekly_xp int not null default 0,
+  add column if not exists week_key int not null default 0,
+  add column if not exists diamonds int not null default 0,
+  add column if not exists streak int not null default 0,
+  add column if not exists last_reward date,
+  add column if not exists time_seconds bigint not null default 0;
+
+create index if not exists profiles_xp_idx on public.profiles (xp desc) where xp > 0;
+create index if not exists profiles_weekly_idx on public.profiles (week_key, weekly_xp desc) where weekly_xp > 0;
+
+create or replace function public.hub_week_key()
+returns int language sql stable set search_path = public as $$
+  select (extract(isoyear from (now() at time zone 'UTC'))::int * 100
+        + extract(week    from (now() at time zone 'UTC'))::int);
+$$;
+
+create table if not exists public.game_plays (
+  user_id   uuid not null references public.profiles (id) on delete cascade,
+  game_key  text not null,
+  play_date date not null,
+  primary key (user_id, game_key, play_date)
+);
+alter table public.game_plays enable row level security;
+
+create or replace function public.hub_add_xp(p_amount int)
+returns void language plpgsql security definer set search_path = public as $$
+declare wk int := public.hub_week_key();
+begin
+  update public.profiles
+     set xp = xp + p_amount,
+         weekly_xp = (case when week_key = wk then weekly_xp else 0 end) + p_amount,
+         week_key = wk
+   where id = auth.uid();
+end; $$;
+
+create or replace function public.hub_award_active(p_seconds int)
+returns table(xp int, weekly_xp int, diamonds int)
+language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare s int := greatest(0, least(coalesce(p_seconds, 0), 120));
+        wk int := public.hub_week_key();
+        t0 bigint; t1 bigint; xp_gain int; dia_gain int;
+begin
+  select time_seconds into t0 from public.profiles where id = auth.uid();
+  if t0 is null then return; end if;
+  t1 := t0 + s;
+  xp_gain  := (t1 / 60)::int  - (t0 / 60)::int;
+  dia_gain := (t1 / 600)::int - (t0 / 600)::int;
+  update public.profiles
+     set time_seconds = t1,
+         diamonds = diamonds + dia_gain,
+         xp = xp + xp_gain,
+         weekly_xp = (case when week_key = wk then weekly_xp else 0 end) + xp_gain,
+         week_key = wk
+   where id = auth.uid();
+  return query select p.xp, p.weekly_xp, p.diamonds from public.profiles p where p.id = auth.uid();
+end; $$;
+
+create or replace function public.hub_award_variety(p_game_key text)
+returns table(awarded boolean, xp int, weekly_xp int)
+language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare did boolean := false; k text := left(coalesce(p_game_key, ''), 64);
+begin
+  if auth.uid() is null or k = '' then return query select false, 0, 0; return; end if;
+  insert into public.game_plays (user_id, game_key, play_date)
+  values (auth.uid(), k, (now() at time zone 'UTC')::date)
+  on conflict do nothing;
+  if found then perform public.hub_add_xp(20); did := true; end if;
+  return query select did, p.xp, p.weekly_xp from public.profiles p where p.id = auth.uid();
+end; $$;
+
+create or replace function public.hub_claim_daily()
+returns table(claimed boolean, reward int, streak int, diamonds int)
+language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare today date := (now() at time zone 'UTC')::date;
+        v_last date; v_streak int; v_reward int;
+begin
+  select last_reward, streak into v_last, v_streak from public.profiles where id = auth.uid();
+  if v_last = today then
+    return query select false, 0, p.streak, p.diamonds from public.profiles p where p.id = auth.uid();
+    return;
+  end if;
+  if v_last = today - 1 then v_streak := coalesce(v_streak, 0) + 1; else v_streak := 1; end if;
+  v_reward := least(10 + (v_streak - 1) * 5, 100);
+  update public.profiles
+     set diamonds = diamonds + v_reward, streak = v_streak, last_reward = today
+   where id = auth.uid();
+  return query select true, v_reward, p.streak, p.diamonds from public.profiles p where p.id = auth.uid();
+end; $$;
+
+revoke execute on function public.hub_add_xp(int)        from public, anon, authenticated;
+revoke execute on function public.hub_award_active(int)   from public, anon;
+revoke execute on function public.hub_award_variety(text) from public, anon;
+revoke execute on function public.hub_claim_daily()       from public, anon;
+grant  execute on function public.hub_award_active(int)   to authenticated;
+grant  execute on function public.hub_award_variety(text) to authenticated;
+grant  execute on function public.hub_claim_daily()       to authenticated;
+
+create or replace view public.hub_board_weekly with (security_invoker = true) as
+  select username, rank, weekly_xp as score from public.profiles
+  where week_key = public.hub_week_key() and weekly_xp > 0
+  order by weekly_xp desc, username limit 100;
+
+create or replace view public.hub_board_alltime with (security_invoker = true) as
+  select username, rank, xp as score from public.profiles
+  where xp > 0 order by xp desc, username limit 100;
+
+grant select on public.hub_board_weekly, public.hub_board_alltime to anon, authenticated;

@@ -51,13 +51,30 @@ function loadLibrary() {
 
 async function loadProfile(user) {
   if (!user) { me = null; return; }
-  const { data } = await db.from('profiles').select('username, rank').eq('id', user.id).maybeSingle();
+  const { data } = await db.from('profiles')
+    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward')
+    .eq('id', user.id).maybeSingle();
   me = {
     id: user.id,
     email: user.email,
     username: (data && data.username) || 'player',
     rank: (data && data.rank) || 'player',
+    xp: (data && data.xp) || 0,
+    weeklyXp: (data && data.weekly_xp) || 0,
+    diamonds: (data && data.diamonds) || 0,
+    streak: (data && data.streak) || 0,
+    lastReward: (data && data.last_reward) || null,
   };
+}
+
+// The UTC date as YYYY-MM-DD, matching how the daily reward is tracked server-side.
+export function utcToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Whether today's daily reward is still unclaimed (null profile = not signed in).
+export function dailyAvailable() {
+  return Boolean(me) && me.lastReward !== utcToday();
 }
 
 // Connect and restore any saved session. Resolves even if the server is down.
@@ -224,4 +241,48 @@ export async function removeGame(game) {
   if (!data || !data.length) throw new Error('Your rank is not allowed to do that.');
   if (game.filePath) db.storage.from('game-files').remove([game.filePath]).catch(() => {});
   if (game.imagePath) db.storage.from('game-images').remove([game.imagePath]).catch(() => {});
+}
+
+/* --------------------------- XP & leaderboard -------------------------- */
+
+// Fetch the top players. scope is 'week' or 'all'. Readable even signed out.
+export async function leaderboard(scope) {
+  if (!db) return [];
+  const view = scope === 'all' ? 'hub_board_alltime' : 'hub_board_weekly';
+  const { data, error } = await db.from(view).select('username, rank, score');
+  if (error) throw fail(error);
+  return data;
+}
+
+// Report active play time (seconds) and bank the XP / diamonds it earned.
+export async function reportActiveTime(seconds) {
+  if (!db || !me || !(seconds > 0)) return;
+  const { data, error } = await db.rpc('hub_award_active', { p_seconds: Math.round(seconds) });
+  if (error) return;                     // earning is best-effort; never block play
+  const row = data && data[0];
+  if (row) { me.xp = row.xp; me.weeklyXp = row.weekly_xp; me.diamonds = row.diamonds; }
+}
+
+// First play of a game each day earns the variety bonus. Safe to call every open.
+export async function reportVariety(gameKey) {
+  if (!db || !me || !gameKey) return false;
+  const { data, error } = await db.rpc('hub_award_variety', { p_game_key: String(gameKey) });
+  if (error) return false;
+  const row = data && data[0];
+  if (row) { me.xp = row.xp; me.weeklyXp = row.weekly_xp; }
+  return Boolean(row && row.awarded);
+}
+
+// Claim today's daily reward. Returns { claimed, reward, streak } or null.
+export async function claimDaily() {
+  need();
+  const { data, error } = await db.rpc('hub_claim_daily');
+  if (error) throw fail(error);
+  const row = data && data[0];
+  if (row) {
+    me.diamonds = row.diamonds;
+    me.streak = row.streak;
+    if (row.claimed) me.lastReward = utcToday();
+  }
+  return row;
 }

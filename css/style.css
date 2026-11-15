@@ -328,3 +328,5 @@ dialog.win::backdrop { background: rgba(0, 0, 32, .55); }
 .win-list table { width: 100%; border-collapse: collapse; }
 .win-list th { position: sticky; top: 0; text-align: left; background: var(--silver); box-shadow: var(--raised); padding: 4px 8px; font: bold 13px var(--sans); }
 .win-list td { padding: 4px 8px; }
+
+.win-stats { font: 14px var(--sans); color: #000; background: #fff; padding: 7px 9px; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf; }

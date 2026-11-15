@@ -6,7 +6,7 @@
 // Text and artwork are painted onto 2D canvases and used as textures.
 
 import * as THREE from '../vendor/three.module.min.js';
-import { GAMES, RANKS } from './games.js';
+import { GAMES } from './games.js';
 import * as backend from './backend.js';
 import * as dialogs from './dialogs.js';
 
@@ -153,11 +153,67 @@ let blobUrl = null;
 // Built-in games plus any added from inside the HUB.
 let allGames = [...GAMES];
 
+// Leaderboard data, loaded lazily. null = not fetched yet.
+const board = { scope: 'week', week: null, all: null };
+
+/* ---- active play time: fuels XP (1/min) and diamonds (1/10min) ---- */
+// Time only counts while a game is open, the tab is visible, and the window
+// is focused — so leaving a game open in a background tab earns nothing.
+let activeAccum = 0;
+let activeTimer = 0;
+function activeNow() { return Boolean(playing) && !document.hidden && document.hasFocus(); }
+function flushActiveTime() {
+  const secs = activeAccum;
+  activeAccum = 0;
+  return secs > 0 ? backend.reportActiveTime(secs) : Promise.resolve();
+}
+function startActiveTracking() {
+  stopActiveTracking();
+  activeTimer = setInterval(() => {
+    if (activeNow()) {
+      activeAccum += 1;
+      if (activeAccum >= 25) flushActiveTime();   // send in small batches
+    }
+  }, 1000);
+}
+function stopActiveTracking() {
+  if (activeTimer) { clearInterval(activeTimer); activeTimer = 0; }
+}
+addEventListener('pagehide', flushActiveTime);
+
+// Reload both leaderboards and redraw.
+async function refreshBoard() {
+  if (!backend.configured) return;
+  try {
+    const [week, all] = await Promise.all([backend.leaderboard('week'), backend.leaderboard('all')]);
+    board.week = week; board.all = all;
+  } catch (err) {
+    console.error('Could not load the leaderboard', err);
+    board.week = board.week || []; board.all = board.all || [];
+  }
+  if (hub) hub.rebuild();
+}
+
+async function claimDailyFlow() {
+  try {
+    const r = await backend.claimDaily();
+    if (r && r.claimed) toast(`Day ${r.streak}! +${r.reward} diamonds 💎`);
+    else toast('Already claimed today — come back tomorrow!');
+  } catch (err) {
+    toast(err.message);
+  }
+  if (hub) hub.rebuild();
+}
+
 async function openGame(game) {
   if (playing === game) return;
   const token = ++openToken;
   playing = game;
   syncMusic();            // the game brings its own sound
+  if (backend.me) {
+    backend.reportVariety(game.id);   // first play of this game today earns a bonus
+    startActiveTracking();
+  }
   loader.show('Loading ' + game.title, nextLoadingImage());
   $('player-title').textContent = game.title;
   $('player-open').hidden = !game.url;
@@ -201,6 +257,9 @@ function closeGame() {
   if (!playing) return;
   openToken++;
   playing = null;
+  stopActiveTracking();
+  // Bank the last of the play time, then refresh stats + board.
+  flushActiveTime().then(() => { if (backend.configured) refreshBoard(); });
   syncMusic();
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   frame.src = 'about:blank';
@@ -571,7 +630,7 @@ function startHub(logoImage) {
 
   let W = 0, H = 0, total = 0, maxScroll = 0;
   let scroll = 0, scrollTarget = 0;
-  const anchors = { top: 0, games: 0, community: 0 };
+  const anchors = { top: 0, games: 0, board: 0 };
   let interactives = [];
   let updaters = [];
   let hovered = null;
@@ -710,7 +769,7 @@ function startHub(logoImage) {
     } else {
       addLink('Sign In', 78, () => openAccountOrAuth('in'));
     }
-    if (W >= 480) addLink('Community', 96, () => scrollTo(anchors.community));
+    if (W >= 480) addLink('Scores', 78, () => scrollTo(anchors.board));
     addLink('Games', 70, () => scrollTo(anchors.games));
     // Music switch: stays pressed in while the song is on.
     if (full) addLink(musicOn ? '♪ Music: On' : '♪ Music: Off', 112, toggleMusic, { down: musicOn });
@@ -1075,100 +1134,161 @@ function startHub(logoImage) {
     g.fill();
   }
 
-  function buildCommunity(y, cw, wide) {
-    const pad = wide ? 30 : 18;
-    const cellH = 84;
-    const tapeH = backend.configured ? 0 : 34;   // "under construction" until accounts are switched on
-    const h = (wide ? 262 : 226 + RANKS.length * (cellH + 8)) + tapeH;
-    const blurb = !backend.configured
-      ? 'Sign-ins are on the way! Once they land you get a profile and a rank, and Owners and Admins can add HTML games straight into the HUB.'
-      : backend.me
-        ? `You are signed in as ${backend.me.username} (${backend.me.rank.charAt(0).toUpperCase() + backend.me.rank.slice(1)}). Owners and Admins can add HTML games straight into the HUB.`
-        : 'Sign up to get a profile and a rank! Owners and Admins can add HTML games straight into the HUB.';
-    const box = panel(cw, h, (g, w, ph) => {
-      // ridge-bordered table
-      bevel(g, 0, 0, w, ph, { t: 3 });
-      g.fillStyle = C.navy;
-      g.fillRect(8, 8, w - 16, ph - 16);
-
-      // hazard tape
-      if (tapeH) {
-      g.save();
-      g.beginPath();
-      g.rect(8, 8, w - 16, tapeH);
-      g.clip();
-      g.fillStyle = C.yellow;
-      g.fillRect(8, 8, w - 16, tapeH);
-      g.fillStyle = C.ink;
-      for (let x = -tapeH; x < w; x += 36) {
-        g.beginPath();
-        g.moveTo(x, 8 + tapeH);
-        g.lineTo(x + 18, 8 + tapeH);
-        g.lineTo(x + 18 + tapeH, 8);
-        g.lineTo(x + tapeH, 8);
-        g.closePath();
-        g.fill();
+  // Places a row of buttons, wrapping to new rows when they don't fit.
+  function buttonRow(specs, y, cw, wide) {
+    const gap = 12;
+    const fits = wide && specs.reduce((s, b) => s + b.w + gap, -gap) <= cw;
+    if (fits) {
+      const totalW = specs.reduce((s, b) => s + b.w + gap, -gap);
+      let bx = -totalW / 2;
+      for (const b of specs) {
+        const mesh = button(b.label, b.w, 40, { size: 14, down: b.down });
+        place(mesh, bx + b.w / 2, y, 40);
+        page.add(mesh);
+        interactive(mesh, 'page', b.act, (on) => mesh.userData.setHover(on));
+        bx += b.w + gap;
       }
-      g.restore();
-      g.font = `bold 15px ${SANS}`;
-      const uc = 'UNDER CONSTRUCTION';
-      const ucW = g.measureText(uc).width + 24;
-      g.fillStyle = C.ink;
-      g.fillRect(w / 2 - ucW / 2, 12, ucW, tapeH - 8);
-      g.fillStyle = C.yellow;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.fillText(uc, w / 2, 8 + tapeH / 2 + 1);
-      }
+      return y + 40;
+    }
+    // stacked, one per row
+    const w = Math.min(320, cw);
+    for (const b of specs) {
+      const mesh = button(b.label, w, 42, { size: 15, down: b.down });
+      place(mesh, 0, y, 42);
+      page.add(mesh);
+      interactive(mesh, 'page', b.act, (on) => mesh.userData.setHover(on));
+      y += 42 + 10;
+    }
+    return y - 10;
+  }
 
-      g.textAlign = 'left';
+  function buildLeaderboard(y, cw, wide) {
+    const rows = board[board.scope];               // null until loaded
+    const topN = wide ? 10 : 8;
+    const shown = rows ? rows.slice(0, topN) : [];
+    const myName = backend.me ? backend.me.username : null;
+
+    // heading
+    const head = panel(cw, 84, (g) => {
       g.textBaseline = 'alphabetic';
-      const top = 8 + tapeH;
-      g.font = `bold 30px ${COMIC}`;
-      g.fillStyle = C.yellow;
-      g.fillText('Community', pad, top + 44);
-      g.font = `18px ${TIMES}`;
+      g.font = `bold 34px ${COMIC}`;
+      g.fillStyle = C.magenta; g.fillText('Leaderboard', 3, 39);
+      g.fillStyle = C.yellow;  g.fillText('Leaderboard', 0, 36);
+      g.font = `italic 18px ${TIMES}`;
       g.fillStyle = '#ffffff';
-      const lines = wrapLines(g, blurb, Math.min(w - pad * 2, 720), 5);
-      const endY = drawLines(g, lines, pad, top + 76, 24);
+      g.fillText('Sign in and play to climb — XP for playing, diamonds for the shop!', 0, 68);
+    });
+    place(head, 0, y, 84); page.add(head);
+    y += 84 + 14;
 
-      const n = RANKS.length;
-      const gap = 10;
-      RANKS.forEach((rank, i) => {
-        let bx, by, bwid;
-        if (wide) {
-          bwid = (w - pad * 2 - gap * (n - 1)) / n;
-          bx = pad + i * (bwid + gap);
-          by = ph - pad - cellH;
-        } else {
-          bwid = w - pad * 2;
-          bx = pad;
-          by = endY - 4 + i * (cellH + 8);
-        }
-        bevel(g, bx, by, bwid, cellH);
-        g.fillStyle = rank.color;
-        g.font = `bold 21px ${TIMES}`;
-        g.fillText(rank.title, bx + 14, by + 32);
-        g.font = `16px ${TIMES}`;
-        g.fillStyle = C.ink;
-        drawLines(g, wrapLines(g, rank.blurb, bwid - 28, 2), bx + 14, by + 54, 18);
+    // Weekly / All-time toggle
+    const tw = 150, th = 40, tgap = 12;
+    const weekBtn = button('This Week', tw, th, { down: board.scope === 'week', size: 15 });
+    const allBtn = button('All-Time', tw, th, { down: board.scope === 'all', size: 15 });
+    place(weekBtn, -(tw + tgap) / 2, y, th);
+    place(allBtn, (tw + tgap) / 2, y, th);
+    page.add(weekBtn, allBtn);
+    interactive(weekBtn, 'page', () => { board.scope = 'week'; hub.rebuild(); }, (on) => weekBtn.userData.setHover(on));
+    interactive(allBtn, 'page', () => { board.scope = 'all'; hub.rebuild(); }, (on) => allBtn.userData.setHover(on));
+    y += th + 14;
+
+    // the ranked list, as a Windows 95 window
+    const rowH = 34;
+    const listRows = shown.length || 2;
+    const winH = 40 + listRows * rowH + 14;
+    const lw = Math.min(cw, 720);
+    const boardPanel = panel(lw, winH, (g, w, ph) => {
+      bevel(g, 0, 0, w, ph);
+      const bar = g.createLinearGradient(6, 0, w - 6, 0);
+      bar.addColorStop(0, C.navy); bar.addColorStop(1, '#1084D0');
+      g.fillStyle = bar; g.fillRect(6, 6, w - 12, 26);
+      g.textAlign = 'left'; g.textBaseline = 'middle';
+      g.fillStyle = '#fff'; g.font = `bold 14px ${SANS}`;
+      g.fillText((board.scope === 'week' ? 'Weekly' : 'All-Time') + ' Top ' + topN + '.exe', 12, 20);
+
+      const lx = 10, ly0 = 40, lwid = w - 20, lht = ph - ly0 - 10;
+      bevel(g, lx, ly0, lwid, lht, { pressed: true, fill: '#fff' });
+      g.textBaseline = 'middle';
+      if (!rows || !shown.length) {
+        g.fillStyle = '#555'; g.font = `italic 16px ${TIMES}`; g.textAlign = 'center';
+        g.fillText(!rows ? 'Loading…' : 'No one yet — play a game to be first!', w / 2, ly0 + lht / 2);
+        return;
+      }
+      const medal = ['#D4AF37', '#9AA4AF', '#CD7F32'];   // gold / silver / bronze
+      shown.forEach((p, i) => {
+        const ry = ly0 + 4 + i * rowH;
+        const mine = p.username === myName;
+        if (mine) { g.fillStyle = '#FFF6B0'; g.fillRect(lx + 3, ry, lwid - 6, rowH - 2); }
+        g.textAlign = 'right';
+        g.font = `bold 17px ${MONO}`;
+        g.fillStyle = i < 3 ? medal[i] : '#666';
+        g.fillText('#' + (i + 1), lx + 46, ry + rowH / 2);
+        g.textAlign = 'left';
+        g.font = `bold 17px ${TIMES}`;
+        g.fillStyle = p.rank === 'owner' ? '#B8860B' : p.rank === 'admin' ? '#0000CC' : '#000';
+        const name = p.username + (mine ? ' (you)' : '');
+        g.fillText(name, lx + 58, ry + rowH / 2);
+        const nameEnd = lx + 58 + g.measureText(name).width;
+        const badge = p.rank === 'owner' ? '♔' : p.rank === 'admin' ? '★' : '';
+        if (badge) { g.font = `15px ${TIMES}`; g.fillText(badge, nameEnd + 10, ry + rowH / 2 - 1); }
+        g.textAlign = 'right';
+        g.font = `bold 16px ${SANS}`;
+        g.fillStyle = '#006400';
+        g.fillText((p.score || 0).toLocaleString() + ' XP', lx + lwid - 12, ry + rowH / 2);
       });
     });
-    place(box, 0, y, h);
-    page.add(box);
-    y += h;
+    place(boardPanel, 0, y, winH); page.add(boardPanel);
+    y += winH + 14;
 
-    // Account buttons under the table, once accounts are switched on.
-    if (backend.configured) {
-      y += 16;
-      const first = button(backend.me ? 'My Account' : 'Sign Up - it is free!', 190, 40, { size: 15 });
-      const second = button('Members', 120, 40, { size: 15 });
-      place(first, -65, y, 40);
-      place(second, 100, y, 40);
-      page.add(first, second);
-      interactive(first, 'page', () => openAccountOrAuth('up'), (on) => first.userData.setHover(on));
-      interactive(second, 'page', () => dialogs.openMembers(), (on) => second.userData.setHover(on));
-      y += 40;
+    // your stats + actions
+    if (backend.configured && backend.me) {
+      const me = backend.me;
+      const myRows = rows || [];
+      const pos = myRows.findIndex((p) => p.username === me.username);
+      const scoreNow = board.scope === 'week' ? me.weeklyXp : me.xp;
+      const stats = [
+        pos >= 0 ? 'Rank #' + (pos + 1) : 'Unranked',
+        scoreNow.toLocaleString() + ' XP',
+        me.diamonds.toLocaleString() + ' diamonds',
+        me.streak + ' day streak',
+      ].join('   •   ');
+      const stripH = wide ? 46 : 58;
+      const strip = panel(Math.min(cw, 720), stripH, (g, w, ph) => {
+        bevel(g, 0, 0, w, ph, { fill: C.navy });
+        g.textBaseline = 'middle';
+        if (wide) {
+          // username on the left, stats on the right (shrunk to fit the gap)
+          g.textAlign = 'left';
+          g.font = `bold 16px ${SANS}`; g.fillStyle = C.yellow;
+          g.fillText(me.username, 14, ph / 2);
+          const used = g.measureText(me.username).width;
+          g.textAlign = 'right'; g.fillStyle = '#fff';
+          fitFont(g, stats, w - 36 - used, 15, SANS, 11);
+          g.fillText(stats, w - 14, ph / 2);
+        } else {
+          // two lines: username above, stats below (shrunk to fit the width)
+          g.textAlign = 'left';
+          g.font = `bold 15px ${SANS}`; g.fillStyle = C.yellow;
+          g.fillText(me.username, 12, 18);
+          g.fillStyle = '#fff';
+          fitFont(g, stats, w - 24, 14, SANS, 10);
+          g.fillText(stats, 12, 40);
+        }
+      });
+      place(strip, 0, y, stripH); page.add(strip);
+      y += stripH + 12;
+
+      const avail = backend.dailyAvailable();
+      const specs = [{
+        label: avail ? 'Claim daily reward!' : 'Daily reward claimed',
+        w: 210, down: !avail,
+        act: avail ? claimDailyFlow : () => toast('Already claimed today — come back tomorrow!'),
+      }];
+      if (backend.isStaff()) specs.push({ label: '+ Add a game', w: 150, act: () => dialogs.openAddGame() });
+      specs.push({ label: 'Members', w: 120, act: () => dialogs.openMembers() });
+      y = buttonRow(specs, y, cw, wide);
+    } else if (backend.configured) {
+      y = buttonRow([{ label: 'Sign up to join the board!', w: 260, act: () => openAccountOrAuth('up') }], y, cw, wide);
     }
     return y;
   }
@@ -1313,8 +1433,8 @@ function startHub(logoImage) {
     anchors.games = y - NAV_H - 18;
     y = buildGames(y, cw);
     y = buildRule(y + 48, cw) + 44;
-    anchors.community = y - NAV_H - 24;
-    y = buildCommunity(y, cw, wide);
+    anchors.board = y - NAV_H - 24;
+    y = buildLeaderboard(y, cw, wide);
     y = buildRule(y + 44, cw) + 20;
     y = buildFooter(y, cw);
     total = y + 16;
@@ -1486,10 +1606,23 @@ async function boot() {
   // Accounts load in the background so a sleeping server never blocks the page.
   dialogs.setHooks({ toast, gamesChanged: refreshGames });
   backend.onAccountChange(() => { renderQuickList(); if (hub) hub.rebuild(); });
-  backend.start().then(refreshGames).then(() => {
+  backend.start().then(() => Promise.all([refreshGames(), refreshBoard()])).then(() => {
     const linked = gameFromHash();           // a share link to a HUB-added game
     if (linked && !playing) openGame(linked);
   });
+
+  // Opt-in test seam (only when the page is opened with ?eehub-test): lets the
+  // automated tests drive the 3D-canvas controls that have no DOM element.
+  if (location.search.includes('eehub-test')) {
+    window.__EEHUB = {
+      setScope: (s) => { board.scope = s; if (hub) hub.rebuild(); },
+      claimDaily: claimDailyFlow,
+      refreshBoard,
+      board: () => board,
+      me: () => backend.me,
+      openGame, closeGame,
+    };
+  }
 
   await wait(Math.max(0, 1300 - (performance.now() - started)));
   const deepLink = gameFromHash();
