@@ -307,6 +307,7 @@ function renderQuickList() {
   };
   $('quick-list').replaceChildren(
     ...allGames.map((game) => add('Play ' + game.title, () => openGame(game))),
+    add('Open comments', () => dialogs.openComments()),
     add('Toggle music', toggleMusic),
     add(backend.me ? 'My account' : 'Sign in or sign up', openAccountOrAuth),
   );
@@ -773,6 +774,7 @@ function startHub(logoImage) {
       addLink('Sign In', 78, () => openAccountOrAuth('in'));
     }
     addLink('Request', 96, () => window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'));
+    addLink('Talk', 64, () => dialogs.openComments());
     if (W >= 480) addLink('Scores', 78, () => scrollTo(anchors.board));
     addLink('Games', 70, () => scrollTo(anchors.games));
     // Music switch: stays pressed in while the song is on.
@@ -1302,11 +1304,16 @@ function startHub(logoImage) {
         w: 210, down: !avail,
         act: avail ? claimDailyFlow : () => toast('Already claimed today — come back tomorrow!'),
       }];
+      if (!me.hasEmail) specs.push({ label: 'Add email to join the board', w: 240, down: true, act: () => dialogs.openAddEmail() });
       if (backend.isStaff()) specs.push({ label: '+ Add a game', w: 150, act: () => dialogs.openAddGame() });
+      specs.push({ label: 'Comments', w: 120, act: () => dialogs.openComments() });
       specs.push({ label: 'Members', w: 120, act: () => dialogs.openMembers() });
       y = buttonRow(specs, y, cw, wide);
     } else if (backend.configured) {
-      y = buttonRow([{ label: 'Sign up to join the board!', w: 260, act: () => openAccountOrAuth('up') }], y, cw, wide);
+      y = buttonRow([
+        { label: 'Sign up to join the board!', w: 260, act: () => openAccountOrAuth('up') },
+        { label: 'Comments', w: 120, act: () => dialogs.openComments() },
+      ], y, cw, wide);
     }
     return y;
   }

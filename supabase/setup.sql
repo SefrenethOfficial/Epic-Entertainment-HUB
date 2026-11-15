@@ -311,3 +311,114 @@ create policy "staff edit games" on public.games
   using (public.my_rank() in ('owner', 'admin'))
   with check (public.my_rank() in ('owner', 'admin'));
 grant update (title, description, tags, url, image_path) on public.games to authenticated;
+
+-- ------------------------------------------------- email-optional accounts
+-- Accounts can be made with just a username + password. A real email in
+-- contact_email is what puts a player on the leaderboards. Username-only
+-- accounts get a synthetic @noemail.epichub.invalid auth address behind the
+-- scenes (so turn OFF "Confirm email" in Auth settings, or those can't sign in).
+alter table public.profiles add column if not exists contact_email text;
+
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_contact_email_format') then
+    alter table public.profiles
+      add constraint profiles_contact_email_format
+      check (contact_email is null or contact_email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$');
+  end if;
+end $$;
+
+grant update (contact_email) on public.profiles to authenticated;
+
+-- New accounts: copy a real signup email into contact_email; leave synthetic ones null.
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  wanted text := new.raw_user_meta_data ->> 'username';
+begin
+  if wanted is null or wanted !~ '^[A-Za-z0-9_]{3,20}$' then
+    wanted := 'player_' || substr(replace(new.id::text, '-', ''), 1, 8);
+  end if;
+  insert into public.profiles (id, username, rank, contact_email)
+  values (
+    new.id,
+    wanted,
+    case when exists (select 1 from public.profiles where rank = 'owner') then 'player' else 'owner' end,
+    case when new.email is null or new.email like '%@noemail.epichub.invalid' then null else new.email end
+  );
+  return new;
+end; $$;
+
+-- Keep contact_email in step if a player's auth email later changes or verifies.
+create or replace function public.sync_contact_email()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.email is not null and new.email not like '%@noemail.epichub.invalid' then
+    update public.profiles set contact_email = new.email where id = new.id;
+  end if;
+  return new;
+end; $$;
+revoke execute on function public.sync_contact_email() from public, anon, authenticated;
+
+drop trigger if exists on_auth_user_email on auth.users;
+create trigger on_auth_user_email
+  after update of email on auth.users
+  for each row execute function public.sync_contact_email();
+
+-- Backfill existing accounts that signed up with a real email.
+update public.profiles p
+   set contact_email = u.email
+  from auth.users u
+ where u.id = p.id
+   and p.contact_email is null
+   and u.email is not null
+   and u.email not like '%@noemail.epichub.invalid';
+
+-- Leaderboards only list players who added an email.
+create or replace view public.hub_board_weekly with (security_invoker = true) as
+  select username, rank, weekly_xp as score from public.profiles
+  where week_key = public.hub_week_key() and weekly_xp > 0 and contact_email is not null
+  order by weekly_xp desc, username limit 100;
+
+create or replace view public.hub_board_alltime with (security_invoker = true) as
+  select username, rank, xp as score from public.profiles
+  where xp > 0 and contact_email is not null
+  order by xp desc, username limit 100;
+
+grant select on public.hub_board_weekly, public.hub_board_alltime to anon, authenticated;
+
+-- ---------------------------------------------------------------- comments
+-- A global comment wall. Everyone can read; signed-in players post; authors and
+-- staff (Owner/Admin) can delete.
+create table if not exists public.comments (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  body       text not null check (char_length(body) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+create index if not exists comments_created_idx on public.comments (created_at desc);
+
+alter table public.comments enable row level security;
+
+drop policy if exists "comments are public" on public.comments;
+create policy "comments are public" on public.comments for select using (true);
+
+drop policy if exists "post as yourself" on public.comments;
+create policy "post as yourself" on public.comments
+  for insert to authenticated with check (user_id = auth.uid());
+
+drop policy if exists "delete own or staff" on public.comments;
+create policy "delete own or staff" on public.comments
+  for delete to authenticated
+  using (user_id = auth.uid() or public.my_rank() in ('owner', 'admin'));
+
+grant select on public.comments to anon, authenticated;
+grant insert (user_id, body) on public.comments to authenticated;
+grant delete on public.comments to authenticated;
+
+create or replace view public.hub_comments with (security_invoker = true) as
+  select c.id, c.body, c.created_at, c.user_id, p.username, p.rank
+    from public.comments c
+    join public.profiles p on p.id = c.user_id
+   order by c.created_at desc
+   limit 200;
+grant select on public.hub_comments to anon, authenticated;

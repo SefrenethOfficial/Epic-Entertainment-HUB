@@ -6,6 +6,13 @@
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 
 export const USERNAME_RULE = /^[A-Za-z0-9_]{3,20}$/;
+export const EMAIL_RULE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// Accounts can be made without an email. Behind the scenes Supabase still needs
+// one, so username-only accounts get a deterministic address on this throwaway
+// domain (.invalid never resolves). A real email in contact_email is what unlocks
+// the leaderboards.
+const NOEMAIL_DOMAIN = 'noemail.epichub.invalid';
+const syntheticEmail = (username) => username.toLowerCase() + '@' + NOEMAIL_DOMAIN;
 export const MAX_HTML_BYTES = 20 * 1024 * 1024;
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -24,8 +31,8 @@ function announce() { listeners.forEach((fn) => fn(me)); }
 function fail(error, fallback) {
   const text = (error && error.message) || fallback || 'Something went wrong';
   const friendly = [
-    [/invalid login credentials/i, 'Wrong email or password.'],
-    [/already registered|already been registered/i, 'That email already has an account. Try signing in.'],
+    [/invalid login credentials/i, 'Wrong username/email or password.'],
+    [/already registered|already been registered/i, 'That username or email already has an account. Try signing in.'],
     [/email not confirmed/i, 'Check your email and click the confirmation link first.'],
     [/password should be at least/i, 'Password is too short.'],
     [/database error saving new user/i, 'That username is taken or not allowed. Try another one.'],
@@ -52,11 +59,13 @@ function loadLibrary() {
 async function loadProfile(user) {
   if (!user) { me = null; return; }
   const { data } = await db.from('profiles')
-    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward')
+    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward, contact_email')
     .eq('id', user.id).maybeSingle();
+  const contact = (data && data.contact_email) || null;
   me = {
     id: user.id,
-    email: user.email,
+    email: contact,                    // the email the player added, or null
+    hasEmail: Boolean(contact),        // true once they can appear on the boards
     username: (data && data.username) || 'player',
     rank: (data && data.rank) || 'player',
     xp: (data && data.xp) || 0,
@@ -109,30 +118,51 @@ function need() {
 
 /* ------------------------------ accounts ------------------------------ */
 
+// Email is optional. Leave it blank for a username-only account; a real email
+// can be added later (addEmail) to join the leaderboards.
 export async function signUp({ username, email, password }) {
   need();
+  username = (username || '').trim();
+  email = (email || '').trim();
   if (!USERNAME_RULE.test(username)) throw new Error('Usernames are 3-20 letters, numbers or underscores.');
   if (password.length < 8) throw new Error('Use a password with at least 8 characters.');
+  if (email && !EMAIL_RULE.test(email)) throw new Error('That email looks off. Leave it blank to skip it for now.');
   const taken = await db.from('profiles').select('id').ilike('username', username.replace(/_/g, '\\_')).limit(1);
   if (taken.data && taken.data.length) throw new Error('That username is taken.');
   const { data, error } = await db.auth.signUp({
-    email,
+    email: email || syntheticEmail(username),
     password,
     options: { data: { username }, emailRedirectTo: location.origin + location.pathname },
   });
   if (error) throw fail(error);
   // No session means the project wants the email address confirmed first.
-  if (!data.session) return { needsConfirmation: true };
+  if (!data.session) return { needsConfirmation: true, email };
   await loadProfile(data.session.user);
   announce();
-  return { needsConfirmation: false };
+  return { needsConfirmation: false, email };
 }
 
-export async function signIn({ email, password }) {
+// Sign in with either a username (any account) or an email (accounts that added one).
+export async function signIn({ identifier, password }) {
   need();
+  identifier = (identifier || '').trim();
+  const email = identifier.includes('@') ? identifier : syntheticEmail(identifier);
   const { data, error } = await db.auth.signInWithPassword({ email, password });
   if (error) throw fail(error);
   await loadProfile(data.user);
+  announce();
+}
+
+// Add (or change) the email that puts a player on the leaderboards.
+export async function addEmail(email) {
+  need();
+  if (!me) throw new Error('Sign in first.');
+  email = (email || '').trim();
+  if (!EMAIL_RULE.test(email)) throw new Error('That email looks off — check it and try again.');
+  const { error } = await db.from('profiles').update({ contact_email: email }).eq('id', me.id);
+  if (error) throw fail(error);
+  me.email = email;
+  me.hasEmail = true;
   announce();
 }
 
@@ -289,6 +319,37 @@ export async function listPlayCounts() {
 export async function recordPlay(gameKey) {
   if (!db || !gameKey) return;
   await db.rpc('hub_play', { p_key: String(gameKey) }).then(() => {}, () => {});
+}
+
+/* -------------------------------- comments ----------------------------- */
+
+export const MAX_COMMENT = 500;
+// Anyone can delete their own comment; Owners and Admins can delete any.
+export const canModerate = () => isStaff();
+
+// Newest comments first, with each author's username and rank. Readable signed out.
+export async function listComments(limit = 100) {
+  if (!db) return [];
+  const { data, error } = await db.from('hub_comments')
+    .select('id, body, created_at, user_id, username, rank').limit(limit);
+  if (error) throw fail(error);
+  return data || [];
+}
+
+export async function postComment(body) {
+  need();
+  if (!me) throw new Error('Sign in to post a comment.');
+  body = (body || '').trim();
+  if (!body) throw new Error('Write something first.');
+  const { error } = await db.from('comments').insert({ user_id: me.id, body: body.slice(0, MAX_COMMENT) });
+  if (error) throw fail(error);
+}
+
+export async function deleteComment(id) {
+  need();
+  const { data, error } = await db.from('comments').delete().eq('id', id).select('id');
+  if (error) throw fail(error);
+  if (!data || !data.length) throw new Error('You can only delete your own comments.');
 }
 
 /* --------------------------- XP & leaderboard -------------------------- */

@@ -64,11 +64,13 @@ async function run(form, status, busyText, action) {
 
 export function openAuth(startWith = 'in') {
   let mode = startWith;
-  const username = el('input', { type: 'text', name: 'username', autocomplete: 'username', maxLength: 20, spellcheck: false });
-  const email = el('input', { type: 'email', name: 'email', autocomplete: 'email', required: true });
+  const username = el('input', { type: 'text', name: 'username', autocomplete: 'username', maxLength: 40, spellcheck: false });
+  const email = el('input', { type: 'email', name: 'email', autocomplete: 'email' });
   const password = el('input', { type: 'password', name: 'password', required: true, minLength: 8 });
   const userField = field('Username', username, '3-20 letters, numbers or underscores');
+  const emailField = field('Email (optional)', email, 'Add one to join the leaderboards — or add it later.');
   const passField = field('Password', password, 'At least 8 characters');
+  const userLabel = userField.querySelector('span');
   const status = el('p', { className: 'win-status', role: 'alert' });
   const submit = el('button', { type: 'submit', className: 'win-btn primary' });
   const tabIn = el('button', { type: 'button', className: 'win-tab', onclick: () => setMode('in') }, 'Sign In');
@@ -79,8 +81,10 @@ export function openAuth(startWith = 'in') {
     const up = mode === 'up';
     tabIn.setAttribute('aria-pressed', String(!up));
     tabUp.setAttribute('aria-pressed', String(up));
-    userField.hidden = !up;
-    username.required = up;
+    userLabel.textContent = up ? 'Username' : 'Username or email';
+    userField.querySelector('small').hidden = !up;     // the 3-20 hint only when signing up
+    username.maxLength = up ? 20 : 254;
+    emailField.hidden = !up;                            // email is a sign-up field only
     passField.querySelector('small').hidden = !up;
     password.autocomplete = up ? 'new-password' : 'current-password';
     submit.textContent = up ? 'Create account' : 'Sign In';
@@ -93,12 +97,15 @@ export function openAuth(startWith = 'in') {
       if (mode === 'up') {
         const result = await backend.signUp({ username: username.value.trim(), email: email.value.trim(), password: password.value });
         if (result.needsConfirmation) {
-          form.replaceChildren(el('p', {}, 'Almost there! We sent a confirmation link to ' + email.value.trim() + '. Click it, then come back and sign in.'),
+          const to = result.email;
+          form.replaceChildren(el('p', {}, to
+            ? 'Almost there! We sent a confirmation link to ' + to + '. Click it, then come back and sign in.'
+            : 'Your account is ready — sign in with your username.'),
             el('div', { className: 'win-actions' }, el('button', { type: 'button', className: 'win-btn primary', onclick: () => dlg.close() }, 'OK')));
           return;
         }
       } else {
-        await backend.signIn({ email: email.value.trim(), password: password.value });
+        await backend.signIn({ identifier: username.value.trim(), password: password.value });
       }
       dlg.close();
       hooks.toast('Welcome, ' + backend.me.username + '! Rank: ' + RANK_NAMES[backend.me.rank]);
@@ -106,14 +113,40 @@ export function openAuth(startWith = 'in') {
   } },
     el('div', { className: 'win-tabs' }, tabIn, tabUp),
     userField,
-    field('Email', email),
+    emailField,
     passField,
     status,
     el('div', { className: 'win-actions' }, submit),
   );
   const dlg = openWindow('Epic Entertainment HUB - Account', form);
   setMode(mode);
-  (mode === 'up' ? username : email).focus();
+  username.focus();
+}
+
+/* ------------------------- add email (leaderboards) ----------------------- */
+
+export function openAddEmail() {
+  if (!backend.me) return openAuth();
+  const email = el('input', { type: 'email', required: true, autocomplete: 'email', value: backend.me.email || '' });
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Saving…', async () => {
+      await backend.addEmail(email.value.trim());
+      dlg.close();
+      hooks.toast("Email added — you're on the leaderboards now!");
+      hooks.gamesChanged();
+    });
+  } },
+    el('p', { className: 'win-small' }, 'Add an email to show up on the leaderboards. It just keeps the boards fair — no spam.'),
+    field('Email', email),
+    status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel'),
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Save')),
+  );
+  const dlg = openWindow('Join the Leaderboards', form, 360);
+  email.focus();
 }
 
 /* -------------------------------- account -------------------------------- */
@@ -123,13 +156,15 @@ export function openAccount() {
   if (!me) return openAuth();
   const body = el('div', { className: 'win-form' },
     el('p', { className: 'win-who' }, el('strong', {}, me.username), ' ', el('span', { className: 'rank rank-' + me.rank }, RANK_NAMES[me.rank])),
-    el('p', { className: 'win-small' }, me.email),
+    el('p', { className: 'win-small' }, me.hasEmail ? me.email : 'No email added — add one to join the leaderboards.'),
     el('p', { className: 'win-stats' },
       el('strong', {}, (me.xp || 0).toLocaleString()), ' XP',
       '  •  ', el('strong', {}, (me.diamonds || 0).toLocaleString()), ' diamonds',
       '  •  ', el('strong', {}, String(me.streak || 0)), ' day streak'),
     el('div', { className: 'win-actions stack' },
+      me.hasEmail ? null : el('button', { type: 'button', className: 'win-btn primary', onclick: () => { dlg.close(); openAddEmail(); } }, 'Add email for leaderboards…'),
       backend.isStaff() ? el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openAddGame(); } }, 'Add a game…') : null,
+      el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openComments(); } }, 'Comments…'),
       el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openMembers(); } }, 'Members…'),
       el('button', { type: 'button', className: 'win-btn', onclick: async () => {
         await backend.signOut().catch(() => {});
@@ -282,6 +317,72 @@ export function openEditGame(game) {
   );
   const dlg = openWindow('Edit Game', form, 420);
   title.focus();
+}
+
+/* -------------------------------- comments ------------------------------- */
+
+function timeAgo(iso) {
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 45) return 'just now';
+  const mins = secs / 60;
+  if (mins < 60) return Math.round(mins) + 'm ago';
+  const hrs = mins / 60;
+  if (hrs < 24) return Math.round(hrs) + 'h ago';
+  const days = hrs / 24;
+  if (days < 7) return Math.round(days) + 'd ago';
+  return new Date(iso).toLocaleDateString();
+}
+
+export function openComments() {
+  const list = el('div', { className: 'win-list comments' }, 'Loading comments…');
+  const status = el('p', { className: 'win-status', role: 'alert' });
+
+  async function refresh() {
+    try {
+      const rows = await backend.listComments(100);
+      if (!rows.length) {
+        list.replaceChildren(el('p', { className: 'win-small' }, 'No comments yet — be the first to say something!'));
+        return;
+      }
+      const canMod = backend.canModerate();
+      const mine = backend.me && backend.me.id;
+      list.replaceChildren(...rows.map((c) => el('div', { className: 'comment' },
+        el('div', { className: 'comment-head' },
+          el('span', { className: 'rank rank-' + c.rank }, c.username),
+          el('span', { className: 'comment-time' }, timeAgo(c.created_at)),
+          (canMod || c.user_id === mine)
+            ? el('button', { type: 'button', className: 'comment-del', ariaLabel: 'Delete comment', title: 'Delete', onclick: async () => {
+                try { await backend.deleteComment(c.id); refresh(); }
+                catch (err) { status.className = 'win-status error'; status.textContent = err.message; }
+              } }, '×')
+            : null),
+        el('div', { className: 'comment-body' }, c.body))));
+    } catch (err) {
+      list.textContent = '';
+      status.className = 'win-status error';
+      status.textContent = err.message;
+    }
+  }
+
+  let composer;
+  if (backend.me) {
+    const box = el('textarea', { rows: 2, maxLength: backend.MAX_COMMENT, placeholder: 'Say something…', required: true });
+    composer = el('form', { className: 'win-form comment-form', onsubmit: (e) => {
+      e.preventDefault();
+      run(composer, status, 'Posting…', async () => {
+        await backend.postComment(box.value);
+        box.value = '';
+        await refresh();
+      });
+    } },
+      box,
+      el('div', { className: 'win-actions' }, el('button', { type: 'submit', className: 'win-btn primary' }, 'Post')));
+  } else {
+    composer = el('p', { className: 'win-small' }, 'Everyone can read the comments. Sign in to post one.');
+  }
+
+  const dlg = openWindow('Comments', el('div', { className: 'win-form' }, list, status, composer), 440);
+  refresh();
 }
 
 /* -------------------------------- confirm -------------------------------- */
