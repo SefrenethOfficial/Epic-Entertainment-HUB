@@ -442,6 +442,7 @@ new GLTFLoader().load('assets/character.glb', (gltf) => {
   model.scale.setScalar(1.8 / (sz.y || 1));
   bb = new THREE.Box3().setFromObject(model);
   model.position.set(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  model.rotation.y = -Math.PI / 2;   // this model's front points +x; turn it to face +z (our forward)
   model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.material = new THREE.MeshLambertMaterial({ color: 0xc2c6ca }); } });
   glbHolder = new THREE.Group(); glbHolder.add(model); avatar.add(glbHolder);
   noob.group.visible = false; charMode = 'glb';
@@ -520,10 +521,9 @@ function stepPlay(dt) {
     noob.limbs.lleg.rotation.x = sw; noob.limbs.rleg.rotation.x = -sw;
     noob.limbs.larm.rotation.x = -sw; noob.limbs.rarm.rotation.x = sw;
   } else if (glbHolder) {
-    // no skeleton on the model, so fake a walk with a bounce + slight lean
-    const amp = moving ? (run > 1 ? 0.15 : 0.1) : 0.02;
-    glbHolder.position.y = Math.abs(Math.sin(player.walk)) * amp;
-    glbHolder.rotation.x = moving ? 0.07 : 0;
+    // no skeleton, so just a subtle upright bob while moving (no lean)
+    glbHolder.position.y = moving ? Math.abs(Math.sin(player.walk)) * 0.045 : 0;
+    glbHolder.rotation.x = 0;
   }
 
   const camDist = 6.2, camH = 3.2;
@@ -562,7 +562,8 @@ if (location.search.includes('epicbox-test')) {
     addBlock, addObject, clearAll, starterScene, select, deselect,
     resizeFace: (axis, side, v) => { if (selected) resizeFace(selected, axis, side, v); },
     enterPlay, exitPlay, step: stepPlay, keys, player, setYaw: (v) => { player.yaw = v; },
-    orbit, applyOrbit, parts,
+    orbit, applyOrbit, parts, avatar, glb: () => glbHolder, charMode: () => charMode,
+    showAvatar: (yaw) => { avatar.visible = true; avatar.position.set(0, 0, 0); avatar.rotation.y = yaw || 0; },
     selId: () => selected && selected.id,
     partInfo: () => selected && { x: selected.x, y: selected.y, z: selected.z, sx: selected.sx, sy: selected.sy, sz: selected.sz },
     state: () => ({ mode, parts: parts.size, spawn, pos: player.pos.toArray(), coins: player.coins, grounded: player.grounded }),
