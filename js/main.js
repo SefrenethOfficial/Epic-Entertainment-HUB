@@ -123,6 +123,7 @@ let musicOn = true;
 try { musicOn = localStorage.getItem('eehub-music') !== 'off'; } catch (e) { /* default on */ }
 
 function syncMusic() {
+  if (secretActive) { music.pause(); return; }   // the secret has taken the stage
   if (musicOn && !playing && !document.hidden) music.play().catch(() => {});
   else music.pause();
 }
@@ -140,6 +141,108 @@ function toggleMusic() {
   syncMusic();
 }, true));
 document.addEventListener('visibilitychange', syncMusic);
+
+/* ------------------------------------------------------------------ */
+/* (shhh)                                                              */
+/* ------------------------------------------------------------------ */
+
+let secretActive = false;
+const secretSong = new Audio('assets/secret-song.mp3');
+secretSong.loop = true;
+secretSong.volume = 1;
+secretSong.preload = 'auto';
+
+// Called once the last shape is smashed. From here until the page is refreshed,
+// the timer stays up and the song owns the speakers.
+function revealSecret() {
+  if (secretActive) return;
+  secretActive = true;
+  music.pause();
+  secretSong.currentTime = 0;
+  secretSong.play().catch(() => {});
+  startSecretTimer();
+}
+
+// A LiveSplit-style timer that runs and splits on its own.
+function startSecretTimer() {
+  const SEGMENTS = [
+    { name: 'Boot', at: 3.20 },
+    { name: 'Dial-Up', at: 12.80 },
+    { name: 'Lobby', at: 41.50 },
+    { name: 'The Backrooms', at: 98.00 },
+    { name: 'Exit', at: 203.00 },
+  ];
+  const fmt = (s, dec = true) => {
+    if (s < 0) s = 0;
+    const m = Math.floor(s / 60);
+    const sec = s - m * 60;
+    if (m > 0) return m + ':' + (sec < 10 ? '0' : '') + sec.toFixed(dec ? 2 : 0);
+    return sec.toFixed(dec ? 2 : 0);
+  };
+  const fmtSplit = (s) => {
+    const m = Math.floor(s / 60), sec = Math.floor(s - m * 60);
+    return (m > 0 ? m + ':' + (sec < 10 ? '0' : '') + sec : '0:' + (sec < 10 ? '0' : '') + sec);
+  };
+  const delta = (d) => (d <= 0 ? '−' : '+') + fmt(Math.abs(d), true);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'ls-timer';
+  const splits = document.createElement('div');
+  splits.className = 'ls-splits';
+  const rows = SEGMENTS.map((seg) => {
+    const row = document.createElement('div');
+    row.className = 'ls-split';
+    row.innerHTML = `<span class="ls-name"></span><span class="ls-delta"></span><span class="ls-time"></span>`;
+    row.querySelector('.ls-name').textContent = seg.name;
+    row.querySelector('.ls-time').textContent = fmtSplit(seg.at);
+    splits.appendChild(row);
+    return row;
+  });
+  const big = document.createElement('div');
+  big.className = 'ls-big';
+  big.textContent = '0.00';
+  const info = document.createElement('div');
+  info.className = 'ls-info';
+  info.innerHTML = `<span>Previous Segment</span><span class="ls-prev">−</span>`;
+  const prev = info.querySelector('.ls-prev');
+  wrap.append(splits, big, info);
+  document.body.appendChild(wrap);
+
+  // drag the window around by grabbing it
+  let dragging = null;
+  wrap.addEventListener('pointerdown', (e) => {
+    dragging = { dx: e.clientX - wrap.offsetLeft, dy: e.clientY - wrap.offsetTop };
+    wrap.setPointerCapture(e.pointerId);
+  });
+  wrap.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    wrap.style.left = Math.max(0, Math.min(innerWidth - wrap.offsetWidth, e.clientX - dragging.dx)) + 'px';
+    wrap.style.top = Math.max(0, Math.min(innerHeight - wrap.offsetHeight, e.clientY - dragging.dy)) + 'px';
+    wrap.style.right = 'auto'; wrap.style.bottom = 'auto';
+  });
+  wrap.addEventListener('pointerup', () => { dragging = null; });
+
+  const start = performance.now();
+  let cur = 0;
+  const step = () => {
+    const t = (performance.now() - start) / 1000;
+    big.textContent = fmt(t, true);
+    while (cur < SEGMENTS.length && t >= SEGMENTS[cur].at) {
+      const seg = SEGMENTS[cur];
+      const d = seg.at - (seg.at * 1.035);   // always a touch ahead of the "PB"
+      const row = rows[cur];
+      row.querySelector('.ls-delta').textContent = delta(d);
+      row.querySelector('.ls-delta').classList.add(d <= 0 ? 'ahead' : 'behind');
+      row.querySelector('.ls-time').textContent = fmt(seg.at, true);
+      prev.textContent = delta(d);
+      prev.className = 'ls-prev ' + (d <= 0 ? 'ahead' : 'behind');
+      cur++;
+    }
+    rows.forEach((r, i) => r.classList.toggle('current', i === cur));
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
 
 /* ------------------------------------------------------------------ */
 /* Game player (the games themselves are separate pages in an iframe)  */
@@ -1521,14 +1624,138 @@ function startHub(logoImage) {
     pointer.inside = true;
   }
 
-  let drag = null;
+  // Nothing to see here. Four shapes in the background that happen to move when
+  // you pull on them, and don't take kindly to being pushed together.
+  const secret = (() => {
+    const Z = -150;
+    const group = new THREE.Group();
+    scene.add(group);
+    const geoms = [
+      new THREE.IcosahedronGeometry(70, 0),
+      new THREE.BoxGeometry(96, 96, 96),
+      new THREE.TorusGeometry(58, 18, 8, 14),
+      new THREE.OctahedronGeometry(72, 0),
+    ];
+    const colors = [C.lime, C.cyan, C.magenta, C.yellow];
+    const quad = [[-1, 1], [1, 1], [-1, -1], [1, -1]];
+    let shapes = [];
+    const bursts = [];
+    geoms.forEach((geo, i) => {
+      const edges = new THREE.EdgesGeometry(geo);
+      const mesh = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: colors[i], transparent: true, opacity: 0.4 }));
+      geo.computeBoundingSphere();
+      mesh.position.z = Z;
+      mesh.userData.spin = { x: 0.08 + rand0() * 0.1, y: 0.06 + rand0() * 0.08 };
+      group.add(mesh);
+      shapes.push({ mesh, r: geo.boundingSphere.radius });
+      geo.dispose();
+    });
+
+    function rand0() { return Math.random(); }
+    function viewHalf() {
+      const cz = camera.position.z || 1;
+      const scale = (cz - Z) / cz;
+      return { hw: (W / 2) * scale, hh: (H / 2) * scale };
+    }
+    function layout() {
+      const { hw, hh } = viewHalf();
+      shapes.forEach((s, i) => s.mesh.position.set(quad[i][0] * hw * 0.52, quad[i][1] * hh * 0.5, Z));
+    }
+
+    const ray = new THREE.Raycaster();
+    const nd = new THREE.Vector2();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -Z);
+    const hitPt = new THREE.Vector3();
+    function point(e) {
+      nd.set((e.clientX / W) * 2 - 1, -(e.clientY / H) * 2 + 1);
+      ray.setFromCamera(nd, camera);
+      return ray.ray.intersectPlane(plane, hitPt) ? hitPt : null;
+    }
+    let held = null;
+    const offset = new THREE.Vector3();
+
+    function burst(pos, color) {
+      const N = 16, arr = new Float32Array(N * 3), vel = [];
+      for (let i = 0; i < N; i++) { const a = Math.random() * 6.283, sp = 60 + Math.random() * 170; vel.push([Math.cos(a) * sp, Math.sin(a) * sp, (Math.random() - 0.5) * 90]); }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      const pts = new THREE.Points(g, new THREE.PointsMaterial({ color, size: 6, transparent: true, opacity: 0.9 }));
+      pts.position.copy(pos);
+      group.add(pts);
+      let life = 0;
+      bursts.push((dt) => {
+        life += dt;
+        for (let i = 0; i < N; i++) { arr[i * 3] += vel[i][0] * dt; arr[i * 3 + 1] += vel[i][1] * dt; arr[i * 3 + 2] += vel[i][2] * dt; }
+        g.attributes.position.needsUpdate = true;
+        pts.material.opacity = Math.max(0, 0.9 - life * 1.6);
+        if (life > 0.6) { group.remove(pts); g.dispose(); pts.material.dispose(); return true; }
+        return false;
+      });
+    }
+    function smash(a, b) {
+      const mid = a.mesh.position.clone().lerp(b.mesh.position, 0.5);
+      burst(mid, a.mesh.material.color);
+      burst(mid, b.mesh.material.color);
+      [a, b].forEach((s) => { group.remove(s.mesh); s.mesh.geometry.dispose(); s.mesh.material.dispose(); });
+      shapes = shapes.filter((s) => s !== a && s !== b);
+      if (!shapes.length) revealSecret();
+    }
+
+    return {
+      layout,
+      grab(e) {
+        if (!shapes.length) return false;
+        const p = point(e);
+        if (!p) return false;
+        let best = null, bd = Infinity;
+        for (const s of shapes) { const d = s.mesh.position.distanceTo(p); if (d < s.r * 1.15 && d < bd) { bd = d; best = s; } }
+        if (!best) return false;
+        held = best;
+        offset.copy(best.mesh.position).sub(p);
+        return true;
+      },
+      move(e) {
+        if (!held) return;
+        const p = point(e);
+        if (!p) return;
+        held.mesh.position.x = p.x + offset.x;
+        held.mesh.position.y = p.y + offset.y;
+        for (const s of shapes) {
+          if (s === held) continue;
+          if (held.mesh.position.distanceTo(s.mesh.position) < (held.r + s.r) * 0.72) { const h = held; held = null; return smash(h, s); }
+        }
+      },
+      release() { held = null; },
+      count() { return shapes.length; },
+      positions() {
+        const v = new THREE.Vector3();
+        return shapes.map((s) => { v.copy(s.mesh.position).project(camera); return { x: (v.x * 0.5 + 0.5) * W, y: (-v.y * 0.5 + 0.5) * H }; });
+      },
+      frame(t, dt) {
+        const { hw, hh } = viewHalf();
+        for (const s of shapes) {
+          s.mesh.rotation.x += dt * s.mesh.userData.spin.x;
+          s.mesh.rotation.y += dt * s.mesh.userData.spin.y;
+          if (s !== held) {
+            s.mesh.position.x = clamp(s.mesh.position.x, -hw + s.r, hw - s.r);
+            s.mesh.position.y = clamp(s.mesh.position.y, -hh + s.r, hh - s.r);
+          }
+        }
+        for (let i = bursts.length - 1; i >= 0; i--) if (bursts[i](dt)) bursts.splice(i, 1);
+      },
+    };
+  })();
+
+  let drag = null, secretGrab = false;
   canvas.addEventListener('pointerdown', (e) => {
     setPointer(e);
+    if (secret.grab(e)) { secretGrab = true; canvas.setPointerCapture(e.pointerId); return; }
     drag = { id: e.pointerId, y: e.clientY, start: scrollTarget, moved: 0, touch: e.pointerType !== 'mouse' };
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener('pointermove', (e) => {
     setPointer(e);
+    if (secretGrab) { secret.move(e); return; }
     if (drag && drag.id === e.pointerId) {
       const dy = e.clientY - drag.y;
       drag.moved = Math.max(drag.moved, Math.abs(dy));
@@ -1540,6 +1767,7 @@ function startHub(logoImage) {
   });
   canvas.addEventListener('pointerup', (e) => {
     setPointer(e);
+    if (secretGrab) { secretGrab = false; secret.release(); drag = null; return; }
     const wasDrag = drag && drag.moved > 8;
     const touch = drag && drag.touch;
     drag = null;
@@ -1552,7 +1780,7 @@ function startHub(logoImage) {
       pointer.nx = pointer.ny = 0;
     }
   });
-  canvas.addEventListener('pointercancel', () => { drag = null; pointer.inside = false; });
+  canvas.addEventListener('pointercancel', () => { drag = null; secretGrab = false; secret.release(); pointer.inside = false; });
   canvas.addEventListener('pointerleave', () => { pointer.inside = false; pointer.nx = pointer.ny = 0; });
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -1601,6 +1829,7 @@ function startHub(logoImage) {
     page.position.y = H / 2 + scroll;
     updateHover();
     for (const u of updaters) u(t, dt);
+    secret.frame(t, dt);
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
   };
@@ -1609,6 +1838,11 @@ function startHub(logoImage) {
   });
 
   build();
+  secret.layout();
+  if (location.search.includes('secret-test')) {                            // opt-in test seam
+    window.__secret = secret;
+    window.__audio = () => ({ musicPaused: music.paused, secretPlaying: !secretSong.paused, secretActive });
+  }
   requestAnimationFrame(tick);
   return { rebuild: build };
 }

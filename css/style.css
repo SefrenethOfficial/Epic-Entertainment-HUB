@@ -332,6 +332,36 @@ dialog.win::backdrop { background: rgba(0, 0, 32, .55); }
 
 .win-stats { font: 14px var(--sans); color: #000; background: #fff; padding: 7px 9px; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf; }
 
+/* the timer */
+.ls-timer {
+  position: fixed; left: 18px; bottom: 18px; z-index: 9000;
+  width: 258px; padding: 0 0 2px; cursor: grab; user-select: none;
+  background: linear-gradient(#111317, #050506);
+  border: 1px solid #000; box-shadow: 0 6px 22px rgba(0,0,0,.6);
+  font-family: "Segoe UI", Tahoma, system-ui, sans-serif;
+  color: #fff; -webkit-font-smoothing: antialiased;
+}
+.ls-timer:active { cursor: grabbing; }
+.ls-splits { padding: 4px 0 2px; }
+.ls-split { display: flex; align-items: baseline; gap: 6px; padding: 3px 10px; font-size: 14px; }
+.ls-split.current { background: linear-gradient(#17407a, #0f2a53); }
+.ls-split .ls-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ls-split .ls-delta { font-variant-numeric: tabular-nums; font-size: 13px; color: #bbb; }
+.ls-split .ls-time { font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; color: #dcdcdc; }
+.ls-delta.ahead, .ls-prev.ahead { color: #4fd06a; }
+.ls-delta.behind, .ls-prev.behind { color: #e05a4f; }
+.ls-big {
+  text-align: right; padding: 2px 12px 6px;
+  font-size: 46px; font-weight: 300; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: -1px; color: #fff;
+}
+.ls-info {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 10px; font-size: 13px; color: #cfcfcf;
+  border-top: 1px solid #2a2d33; background: #0b0c0e;
+}
+.ls-info .ls-prev { font-variant-numeric: tabular-nums; }
+
 /* comments */
 .win-list.comments { display: flex; flex-direction: column; gap: 6px; }
 .comment { background: var(--silver); box-shadow: var(--raised); padding: 6px 8px; }
