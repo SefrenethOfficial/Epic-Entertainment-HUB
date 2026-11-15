@@ -91,6 +91,52 @@ function makeSpike() { const g = new THREE.Group(); for (let i = 0; i < 4; i++) 
 function makeBounce() { const g = new THREE.Group(); const base = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.45, 0.95), lam(0x30323c)); base.castShadow = true; base.position.y = 0.22; const top = cyl(0.42, 0.42, 0.18, 18, 0xff2d7a, 0x45001c); top.position.y = 0.5; g.add(base, top); return g; }
 function makeStart() { const g = new THREE.Group(); const p = cyl(0.46, 0.46, 0.12, 22, 0x2ecc71, 0x0a3d1d); p.position.y = 0.06; g.add(p); return g; }
 
+/* ---- functional parts (pizza simulator): spawner + conveyor ---- */
+
+// 0 = North (+z), 1 = East (+x), 2 = South (-z), 3 = West (-x)
+const DIRS = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+const ITEM_COLORS = { dough: 0xe9d7a8, pizza: 0xc9962f, drink: 0x2d6fd6, box: 0x9a6b3a };
+
+function makeSpawner(settings) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), lam(0x5b6470)); body.castShadow = true; body.receiveShadow = true; body.position.y = 0.45; g.add(body);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.12, 0.7), lam(ITEM_COLORS[settings.item] || 0xffcf3f, 0x332200)); top.position.y = 0.96; g.add(top);
+  const chute = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.5), lam(0x30333a)); chute.position.y = 0.1; g.add(chute);
+  return g;
+}
+function chevronTex(dir) {
+  const s = 64, cv = document.createElement('canvas'); cv.width = cv.height = s; const g = cv.getContext('2d');
+  g.fillStyle = '#2f333b'; g.fillRect(0, 0, s, s);
+  g.save(); g.translate(s / 2, s / 2); g.rotate(dir * Math.PI / 2); g.translate(-s / 2, -s / 2);
+  g.strokeStyle = '#f4c400'; g.lineWidth = 7; g.lineCap = 'round';
+  for (const off of [-16, 8]) { g.beginPath(); g.moveTo(18, 14 + off + 16); g.lineTo(44, 32 + off + 16); g.lineTo(18, 50 + off + 16); g.stroke(); }
+  g.restore();
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.magFilter = THREE.NearestFilter; return t;
+}
+function makeConveyor(settings) {
+  const g = new THREE.Group();
+  const top = new THREE.MeshLambertMaterial({ map: chevronTex(settings.dir) });
+  const dark = lam(0x24272d);
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.3, 0.98), [dark, dark, top, dark, dark, dark]);
+  belt.castShadow = true; belt.receiveShadow = true; belt.position.y = 0.15; g.add(belt);
+  return g;
+}
+
+function makeItem(type) {
+  const g = new THREE.Group();
+  if (type === 'pizza') { const base = cyl(0.3, 0.3, 0.08, 16, 0xd9a441); base.position.y = 0.08; const sauce = cyl(0.26, 0.26, 0.04, 16, 0xc0392b); sauce.position.y = 0.13; g.add(base, sauce); for (let i = 0; i < 4; i++) { const t = cyl(0.03, 0.03, 0.03, 6, 0xd94f2b); t.position.set(Math.cos(i) * 0.14, 0.15, Math.sin(i) * 0.14); g.add(t); } }
+  else if (type === 'drink') { const cup = cyl(0.12, 0.09, 0.3, 12, 0x2d6fd6); cup.position.y = 0.15; const lid = cyl(0.13, 0.13, 0.04, 12, 0xecf0f1); lid.position.y = 0.3; g.add(cup, lid); }
+  else if (type === 'box') { const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.34), lam(0x9a6b3a)); b.castShadow = true; b.position.y = 0.13; g.add(b); }
+  else { const d = cyl(0.26, 0.26, 0.1, 14, 0xe9d7a8); d.position.y = 0.08; g.add(d); }   // dough
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
+const FUNC = {
+  spawner: { label: 'Spawner', kind: 'spawner', defaults: { item: 'dough', interval: 2, max: 8 }, make: makeSpawner },
+  conveyor: { label: 'Conveyor', kind: 'conveyor', defaults: { dir: 1, speed: 3 }, make: makeConveyor },
+};
+
 /* ------------------------------------------------------------------ */
 /* Colour palette + object kinds                                       */
 /* ------------------------------------------------------------------ */
@@ -156,6 +202,7 @@ function partMesh(p) {
     m.castShadow = true; m.receiveShadow = true;
     return m;
   }
+  if (FUNC[p.type]) return FUNC[p.type].make(p.settings);
   return OBJECTS[p.type].make();
 }
 function positionMesh(p) {
@@ -180,13 +227,16 @@ function addBlock(color, x, y, z, shape) {
   return p;
 }
 function addObject(type, x, y, z) {
-  const def = OBJECTS[type]; if (!def || !inBounds(x, z) || y < 0 || !cellFree(x, y, z)) return null;
+  const def = OBJECTS[type] || FUNC[type]; if (!def || !inBounds(x, z) || y < 0 || !cellFree(x, y, z)) return null;
   if (def.kind === 'start') for (const [id, p] of parts) if (p.kind === 'start') removePart(id);
   const p = { id: nextId++, kind: def.kind, type, x, y, z, sx: 1, sy: 1, sz: 1, spin: def.spin };
+  if (FUNC[type]) p.settings = { ...FUNC[type].defaults };
   p.mesh = partMesh(p); positionMesh(p); worldGroup.add(p.mesh); parts.set(p.id, p);
   if (def.kind === 'start') spawn = { x, y, z };
   return p;
 }
+// Rebuild a functional part's mesh after its settings change (e.g. conveyor direction).
+function refreshPartMesh(p) { worldGroup.remove(p.mesh); p.mesh = partMesh(p); positionMesh(p); worldGroup.add(p.mesh); }
 function removePart(id) {
   const p = parts.get(id); if (!p) return;
   if (selected === p) deselect();
@@ -194,7 +244,9 @@ function removePart(id) {
   if (p.kind === 'start') spawn = null;
 }
 function clearAll() { for (const id of [...parts.keys()]) removePart(id); }
-function solidParts() { const r = []; for (const p of parts.values()) if (p.kind === 'block' || p.kind === 'bounce') r.push(p); return r; }
+// Conveyors are solid (items + the player rest on them); spawners are not, so
+// dropped items fall through onto whatever belt or floor is below.
+function solidParts() { const r = []; for (const p of parts.values()) if (p.kind === 'block' || p.kind === 'bounce' || p.kind === 'conveyor') r.push(p); return r; }
 
 function starterScene() {
   clearAll();
@@ -213,23 +265,23 @@ const handles = [];   // { mesh, axis:'x'|'y'|'z', side:+1|-1 }
 const HANDLE_COLOR = { x: 0xff4d4d, y: 0x4dff6a, z: 0x4d8bff };
 
 function clearHandles() { handles.forEach((h) => scene.remove(h.mesh)); handles.length = 0; if (outline) { scene.remove(outline); outline.geometry.dispose(); outline = null; } }
-function deselect() { selected = null; clearHandles(); }
+function deselect() { selected = null; clearHandles(); updateGear(); }
 
 function select(p) {
   clearHandles();
-  if (!p || p.kind !== 'block') { selected = null; return; }   // only parts can be stretched
+  if (!p || (p.kind !== 'block' && !FUNC[p.type])) { selected = null; updateGear(); return; }
   selected = p;
-  // outline
   outline = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), new THREE.LineBasicMaterial({ color: 0xffe24d }));
   scene.add(outline);
-  // 6 face handles
-  const faces = [['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1]];
-  for (const [axis, side] of faces) {
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 12), new THREE.MeshBasicMaterial({ color: HANDLE_COLOR[axis] }));
-    mesh.renderOrder = 999; mesh.material.depthTest = false;
-    scene.add(mesh); handles.push({ mesh, axis, side });
+  if (p.kind === 'block') {   // blocks get the stretch handles
+    const faces = [['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1]];
+    for (const [axis, side] of faces) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 12), new THREE.MeshBasicMaterial({ color: HANDLE_COLOR[axis] }));
+      mesh.renderOrder = 999; mesh.material.depthTest = false;
+      scene.add(mesh); handles.push({ mesh, axis, side });
+    }
   }
-  updateHandles();
+  updateHandles(); updateGear();
 }
 function updateHandles() {
   if (!selected) return;
@@ -374,16 +426,52 @@ canvas.addEventListener('pointerup', (e) => {
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => { if (mode === 'play') return; e.preventDefault(); orbit.dist = Math.min(70, Math.max(6, orbit.dist + Math.sign(e.deltaY) * 2.5)); applyOrbit(); }, { passive: false });
 
+function selectable(p) { return p && (p.kind === 'block' || FUNC[p.type]); }
 function clickEdit(cx, cy) {
   if (tool.mode === 'erase') { const p = pickPart(cx, cy); if (p) removePart(p.id); return; }
-  if (tool.mode === 'select') { const p = pickPart(cx, cy); if (p && p.kind === 'block') select(p); else deselect(); return; }
-  // placing a block or object: clicking an existing block selects it instead
+  if (tool.mode === 'select') { const p = pickPart(cx, cy); if (selectable(p)) select(p); else deselect(); return; }
+  // clicking an existing selectable part selects it instead of placing
   const hitPart = pickPart(cx, cy);
-  if (hitPart && hitPart.kind === 'block' && tool.mode === 'block') { select(hitPart); return; }
+  if (hitPart && selectable(hitPart) && tool.mode !== 'object') { select(hitPart); return; }
   const t = pickPlace(cx, cy);
   if (!t) return;
   const p = tool.mode === 'block' ? addBlock(tool.color, t.x, t.y, t.z, shape) : addObject(tool.type, t.x, t.y, t.z);
-  if (p && p.kind === 'block') select(p);   // auto-select so you can stretch immediately
+  if (selectable(p)) select(p);   // auto-select so you can stretch / configure immediately
+}
+
+/* ---- settings panel for functional parts (the gear) ---- */
+
+function updateGear() { const btn = $('gear'); if (btn) btn.hidden = !(selected && FUNC[selected.type]); }
+const ITEM_LABELS = { dough: 'Dough', pizza: 'Pizza', drink: 'Drink', box: 'Box' };
+const DIR_LABELS = ['North (+Z)', 'East (+X)', 'South (−Z)', 'West (−X)'];
+
+function openSettings(p) {
+  const def = FUNC[p.type]; if (!def) return;
+  document.getElementById('eb-dialog')?.remove();
+  const dlg = document.createElement('div'); dlg.id = 'eb-dialog'; dlg.className = 'eb-dialog';
+  const rows = [];
+  const field = (label, input) => { const l = document.createElement('label'); const s = document.createElement('span'); s.textContent = label; l.append(s, input); rows.push(l); return input; };
+  const numberInput = (val, min, max, step) => { const i = document.createElement('input'); i.type = 'number'; i.value = val; i.min = min; i.max = max; i.step = step || 1; return i; };
+  const selectInput = (opts, val) => { const s = document.createElement('select'); opts.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; s.appendChild(o); }); s.value = val; return s; };
+
+  if (p.type === 'spawner') {
+    const item = field('Spawns', selectInput(Object.entries(ITEM_LABELS), p.settings.item));
+    const interval = field('Every (seconds)', numberInput(p.settings.interval, 0.2, 30, 0.1));
+    const max = field('Max at once', numberInput(p.settings.max, 1, 50, 1));
+    item.addEventListener('change', () => { p.settings.item = item.value; refreshPartMesh(p); });
+    interval.addEventListener('change', () => { p.settings.interval = Math.max(0.2, +interval.value || 2); });
+    max.addEventListener('change', () => { p.settings.max = Math.max(1, Math.round(+max.value || 8)); });
+  } else if (p.type === 'conveyor') {
+    const dir = field('Direction', selectInput(DIR_LABELS.map((t, i) => [i, t]), p.settings.dir));
+    const speed = field('Speed', numberInput(p.settings.speed, 0.5, 12, 0.5));
+    dir.addEventListener('change', () => { p.settings.dir = +dir.value; refreshPartMesh(p); });
+    speed.addEventListener('change', () => { p.settings.speed = Math.max(0.5, +speed.value || 3); });
+  }
+  const title = document.createElement('div'); title.className = 'eb-dlg-bar'; title.innerHTML = `<span>${def.label} settings</span>`;
+  const x = document.createElement('button'); x.textContent = '×'; x.className = 'eb-dlg-x'; x.onclick = () => dlg.remove(); title.appendChild(x);
+  const body = document.createElement('div'); body.className = 'eb-dlg-body'; rows.forEach((r) => body.appendChild(r));
+  const done = document.createElement('button'); done.className = 'eb-dlg-done'; done.textContent = 'Done'; done.onclick = () => dlg.remove(); body.appendChild(done);
+  dlg.append(title, body); document.body.appendChild(dlg);
 }
 
 /* ------------------------------------------------------------------ */
@@ -413,6 +501,15 @@ function buildPalette() {
   for (const [id, def] of Object.entries(OBJECTS)) orow.appendChild(mkItem('o-' + id, def.label, oswatch[id], () => selectTool({ mode: 'object', type: id, key: 'o-' + id })));
   orow.appendChild(mkItem('erase', 'Eraser', 'repeating-linear-gradient(45deg,#fff,#fff 3px,#f99 3px,#f99 6px)', () => selectTool({ mode: 'erase', key: 'erase' })));
   wrap.appendChild(orow);
+
+  wrap.appendChild(head('Pizza / Logic'));
+  const frow = document.createElement('div'); frow.className = 'pal-row';
+  const fswatch = { spawner: '#5b6470', conveyor: '#f4c400' };
+  for (const [id, def] of Object.entries(FUNC)) frow.appendChild(mkItem('f-' + id, def.label, fswatch[id], () => selectTool({ mode: 'object', type: id, key: 'f-' + id })));
+  wrap.appendChild(frow);
+  const tipf = document.createElement('div'); tipf.className = 'pal-group'; tipf.style.fontWeight = 'normal'; tipf.style.color = '#444';
+  tipf.textContent = 'Place one, click it, then press ⚙ Settings (top bar) to configure it. Set a Spawner over a Conveyor to move items.';
+  wrap.appendChild(tipf);
 
   pickColor(COLORS[5][1], 'c-blue'); highlightShape();
 }
@@ -473,17 +570,64 @@ function collide(axis) {
 }
 function respawn() { const s = spawn || { x: 0, y: 1, z: 0 }; player.pos.set(s.x + 0.5, s.y, s.z + 0.5); player.vel.set(0, 0, 0); }
 
+// Runtime items produced by spawners (cleared when you stop playing).
+const items = [];
+function clearItems() { for (const it of items) worldGroup.remove(it.mesh); items.length = 0; }
+
 function enterPlay() {
   if (mode === 'play') return;
   deselect(); mode = 'play'; player.coins = 0;
-  for (const p of parts.values()) if (p.kind === 'coin') p.mesh.visible = true;
+  document.getElementById('eb-dialog')?.remove();
+  for (const p of parts.values()) { if (p.kind === 'coin') p.mesh.visible = true; if (p.kind === 'spawner') p._t = 0; }
+  clearItems();
   respawn(); avatar.visible = true;
   document.body.classList.add('playing'); $('hud-coins').textContent = 'Coins: 0';
 }
-function exitPlay() { mode = 'edit'; avatar.visible = false; document.body.classList.remove('playing'); applyOrbit(); }
+function exitPlay() { mode = 'edit'; avatar.visible = false; clearItems(); document.body.classList.remove('playing'); applyOrbit(); }
+
+// Highest solid surface at (x,z): top of the tallest part covering it, or the baseplate.
+function supportTop(x, z) {
+  let top = (x > -HALF && x < HALF && z > -HALF && z < HALF) ? 0 : -Infinity;
+  for (const p of solidParts()) if (x >= p.x && x < p.x + p.sx && z >= p.z && z < p.z + p.sz) top = Math.max(top, p.y + p.sy);
+  return top;
+}
+function conveyorUnder(it) {
+  for (const p of parts.values()) {
+    if (p.kind !== 'conveyor') continue;
+    if (it.pos.x >= p.x && it.pos.x < p.x + p.sx && it.pos.z >= p.z && it.pos.z < p.z + p.sz && Math.abs(it.pos.y - (p.y + p.sy)) < 0.2) return p;
+  }
+  return null;
+}
+function spawnItem(src) {
+  const it = { src: src.id, type: src.settings.item, pos: new THREE.Vector3(src.x + src.sx / 2, src.y + src.sy + 0.3, src.z + src.sz / 2), vel: new THREE.Vector3(), mesh: makeItem(src.settings.item) };
+  it.mesh.position.copy(it.pos); worldGroup.add(it.mesh); items.push(it);
+}
+function updateSim(dt) {
+  for (const p of parts.values()) {
+    if (p.kind !== 'spawner') continue;
+    p._t = (p._t || 0) + dt;
+    if (p._t >= p.settings.interval) {
+      p._t = 0;
+      if (items.filter((it) => it.src === p.id).length < p.settings.max) spawnItem(p);
+    }
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    const belt = conveyorUnder(it);
+    if (belt) { const d = DIRS[belt.settings.dir]; it.vel.x = d[0] * belt.settings.speed; it.vel.z = d[1] * belt.settings.speed; }
+    else { it.vel.x *= 0.82; it.vel.z *= 0.82; }
+    it.vel.y -= 26 * dt;
+    it.pos.x += it.vel.x * dt; it.pos.z += it.vel.z * dt; it.pos.y += it.vel.y * dt;
+    const top = supportTop(it.pos.x, it.pos.z);
+    if (it.pos.y <= top) { it.pos.y = top; it.vel.y = 0; }
+    if (it.pos.y < -14 || Math.abs(it.pos.x) > HALF + 2 || Math.abs(it.pos.z) > HALF + 2) { worldGroup.remove(it.mesh); items.splice(i, 1); continue; }
+    it.mesh.position.copy(it.pos); it.mesh.rotation.y += dt * 0.6;
+  }
+}
 
 function stepPlay(dt) {
   dt = Math.min(dt, 0.033);
+  updateSim(dt);   // spawners + conveyors + items
   const run = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.7 : 1;
   const speed = 5.4 * run;
   let ix = 0, iz = 0;
@@ -538,6 +682,7 @@ function stepPlay(dt) {
 $('btn-play').addEventListener('click', enterPlay);
 $('btn-edit').addEventListener('click', exitPlay);
 $('btn-clear').addEventListener('click', () => { if (confirm('Clear the whole world?')) starterScene(); });
+$('gear').addEventListener('click', () => { if (selected && FUNC[selected.type]) openSettings(selected); });
 
 let last = 0;
 function frame(now) {
@@ -562,7 +707,7 @@ if (location.search.includes('epicbox-test')) {
     addBlock, addObject, clearAll, starterScene, select, deselect,
     resizeFace: (axis, side, v) => { if (selected) resizeFace(selected, axis, side, v); },
     enterPlay, exitPlay, step: stepPlay, keys, player, setYaw: (v) => { player.yaw = v; },
-    orbit, applyOrbit, parts, avatar, glb: () => glbHolder, charMode: () => charMode,
+    orbit, applyOrbit, parts, items, refreshPartMesh, avatar, glb: () => glbHolder, charMode: () => charMode,
     showAvatar: (yaw) => { avatar.visible = true; avatar.position.set(0, 0, 0); avatar.rotation.y = yaw || 0; },
     selId: () => selected && selected.id,
     partInfo: () => selected && { x: selected.x, y: selected.y, z: selected.z, sx: selected.sx, sy: selected.sy, sz: selected.sz },

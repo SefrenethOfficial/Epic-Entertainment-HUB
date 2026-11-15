@@ -91,3 +91,22 @@ body.playing #btn-edit { display: inline-block; }
   .hud-keys { display: none; }
   #brand { font-size: 18px; }
 }
+
+/* ---------- functional-part settings dialog ---------- */
+.eb-dialog {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30;
+  width: min(320px, calc(100vw - 20px));
+  background: var(--silver); box-shadow: var(--raised), 6px 6px 0 rgba(0,0,0,.5);
+  font-family: var(--sans);
+}
+.eb-dlg-bar { display: flex; justify-content: space-between; align-items: center; padding: 3px 4px 3px 8px; background: linear-gradient(90deg,#000080,#1084D0); color: #fff; font: bold 13px var(--sans); }
+.eb-dlg-x { width: 20px; height: 18px; border: 0; background: var(--silver); box-shadow: var(--raised); font: bold 14px/1 var(--sans); cursor: pointer; }
+.eb-dlg-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.eb-dlg-body label { display: flex; flex-direction: column; gap: 3px; font: 13px var(--sans); }
+.eb-dlg-body label span { font-weight: bold; }
+.eb-dlg-body input, .eb-dlg-body select {
+  padding: 5px 6px; border: 0; background: #fff; font: 14px var(--sans);
+  box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf;
+}
+.eb-dlg-done { align-self: flex-end; margin-top: 4px; padding: 7px 16px; border: 0; background: #ffe24d; font: bold 13px var(--sans); box-shadow: var(--raised); cursor: pointer; }
+.eb-dlg-done:active { box-shadow: var(--pressed); }
