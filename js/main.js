@@ -769,6 +769,7 @@ function startHub(logoImage) {
     } else {
       addLink('Sign In', 78, () => openAccountOrAuth('in'));
     }
+    addLink('Epicbox', 92, () => { location.href = 'epicbox.html'; });
     if (W >= 480) addLink('Scores', 78, () => scrollTo(anchors.board));
     addLink('Games', 70, () => scrollTo(anchors.games));
     // Music switch: stays pressed in while the song is on.
