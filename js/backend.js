@@ -136,6 +136,17 @@ export async function signIn({ email, password }) {
   announce();
 }
 
+// Sends the browser to Google and back. On return, start()'s session check picks
+// up the signed-in user. Google users get an auto username (player_xxxx).
+export async function signInWithGoogle() {
+  need();
+  const { error } = await db.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: location.origin + location.pathname },
+  });
+  if (error) throw fail(error);
+}
+
 export async function signOut() {
   need();
   await db.auth.signOut();
