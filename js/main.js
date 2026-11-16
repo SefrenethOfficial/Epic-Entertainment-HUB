@@ -337,21 +337,19 @@ async function openGame(game) {
     frame.addEventListener('load', resolve, { once: true });
   });
   if (game.fileUrl) {
-    // An uploaded HTML file. It runs in a sandbox so it cannot touch the HUB
-    // or anyone's account, whatever the file contains.
-    frame.setAttribute('sandbox', 'allow-scripts allow-pointer-lock allow-forms allow-modals');
-    try {
-      const res = await fetch(game.fileUrl);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const html = await res.text();
-      if (token !== openToken) return;
-      blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
-      frame.src = blobUrl;
-    } catch (err) {
-      console.error(err);
-      if (token === openToken) { closeGame(); toast('Could not load ' + game.title + '.'); }
-      return;
-    }
+    // An uploaded HTML file, run sandboxed and loaded straight from its own URL.
+    // Uploaded games live on Supabase storage, a DIFFERENT origin from the HUB,
+    // so we can safely add allow-same-origin: the game gets a real origin (so
+    // localStorage / IndexedDB work — engine games like Unity read those while
+    // starting up, and in an origin-less blob they throw and the game dies), yet
+    // being cross-origin it still can't touch the HUB or anyone's account. A
+    // same-origin file (the built-in secret) must NOT get allow-same-origin, or
+    // it could reach the HUB — it stays fully isolated instead.
+    const crossOrigin = new URL(game.fileUrl, location.href).origin !== location.origin;
+    frame.setAttribute('sandbox', crossOrigin
+      ? 'allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-popups'
+      : 'allow-scripts allow-pointer-lock allow-forms allow-modals');
+    frame.src = game.fileUrl;
   } else {
     frame.removeAttribute('sandbox');
     frame.src = game.url;
@@ -1848,6 +1846,7 @@ function startHub(logoImage) {
     window.__secret = secret;
     window.__audio = () => ({ musicPaused: music.paused, secretPlaying: !secretSong.paused, secretActive });
     window.__openSecret = () => openGame(SECRET_GAME);
+    window.__openGame = (g) => openGame(g);
   }
   requestAnimationFrame(tick);
   return { rebuild: build };
