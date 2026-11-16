@@ -312,6 +312,25 @@ async function claimDailyFlow() {
 // the rest from its own host, and run sandboxed like any uploaded game.
 const SECRET_GAME = { id: 'saul-run', title: '???', fileUrl: 'games/saul.html' };
 
+// Slipped into the top of every uploaded game. A sandboxed game runs in an
+// "opaque" origin where localStorage / sessionStorage / document.cookie THROW
+// the moment they're touched. Engine loaders (Unity and friends) read those
+// while starting up and die on the exception — the black screen some uploads
+// showed. These in-memory stand-ins are installed ONLY if the real ones throw,
+// so normal pages are untouched and the game starts instead.
+const STORAGE_SHIM = `<script>(function(){
+  function mem(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null;},setItem:function(k,v){s[k]=String(v);},removeItem:function(k){delete s[k];},clear:function(){s={};},key:function(i){return Object.keys(s)[i]||null;},get length(){return Object.keys(s).length;}};}
+  function guard(name){try{window[name].getItem("__t__");}catch(e){try{Object.defineProperty(window,name,{value:mem(),configurable:true});}catch(_){}}}
+  guard("localStorage");guard("sessionStorage");
+  try{void document.cookie;}catch(e){try{Object.defineProperty(document,"cookie",{configurable:true,get:function(){return"";},set:function(){}});}catch(_){}}
+})();<\/script>`;
+
+function injectShim(html) {
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + STORAGE_SHIM);
+  if (/<script/i.test(html)) return html.replace(/<script/i, STORAGE_SHIM + '<script');
+  return STORAGE_SHIM + html;
+}
+
 async function openGame(game) {
   if (playing === game) return;
   const token = ++openToken;
@@ -337,19 +356,25 @@ async function openGame(game) {
     frame.addEventListener('load', resolve, { once: true });
   });
   if (game.fileUrl) {
-    // An uploaded HTML file, run sandboxed and loaded straight from its own URL.
-    // Uploaded games live on Supabase storage, a DIFFERENT origin from the HUB,
-    // so we can safely add allow-same-origin: the game gets a real origin (so
-    // localStorage / IndexedDB work — engine games like Unity read those while
-    // starting up, and in an origin-less blob they throw and the game dies), yet
-    // being cross-origin it still can't touch the HUB or anyone's account. A
-    // same-origin file (the built-in secret) must NOT get allow-same-origin, or
-    // it could reach the HUB — it stays fully isolated instead.
-    const crossOrigin = new URL(game.fileUrl, location.href).origin !== location.origin;
-    frame.setAttribute('sandbox', crossOrigin
-      ? 'allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-modals allow-popups'
-      : 'allow-scripts allow-pointer-lock allow-forms allow-modals');
-    frame.src = game.fileUrl;
+    // An uploaded HTML file. It runs in a sandbox (no allow-same-origin) so it
+    // cannot touch the HUB or anyone's account, whatever the file contains, and
+    // we serve it as a blob so it always renders as real HTML regardless of how
+    // the storage host labels it. We also slip in a small storage shim (see
+    // STORAGE_SHIM) so engine games survive the sandbox's origin-less storage.
+    frame.setAttribute('sandbox', 'allow-scripts allow-pointer-lock allow-forms allow-modals');
+    try {
+      const res = await fetch(game.fileUrl);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      let html = await res.text();
+      if (token !== openToken) return;
+      html = injectShim(html);
+      blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+      frame.src = blobUrl;
+    } catch (err) {
+      console.error(err);
+      if (token === openToken) { closeGame(); toast('Could not load ' + game.title + '.'); }
+      return;
+    }
   } else {
     frame.removeAttribute('sandbox');
     frame.src = game.url;
