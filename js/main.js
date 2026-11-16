@@ -413,14 +413,14 @@ function renderQuickList() {
   $('quick-list').replaceChildren(
     ...allGames.map((game) => add('Play ' + game.title, () => openGame(game))),
     add('Toggle music', toggleMusic),
-    add(backend.me ? 'My account' : 'Sign in or sign up', openAccountOrAuth),
+    add(backend.me ? 'My account' : 'Pick a username', openAccountOrAuth),
   );
 }
 
-function openAccountOrAuth(mode = 'in') {
+function openAccountOrAuth() {
   if (backend.me) dialogs.openAccount();
-  else if (backend.configured) dialogs.openAuth(mode);
-  else toast('Sign-ups are coming soon!');
+  else if (backend.configured) dialogs.openAuth();
+  else toast('Accounts are coming soon!');
 }
 
 // Reload the list of HUB-added games, apply play counts, sort most-played first.
@@ -875,7 +875,7 @@ function startHub(logoImage) {
       const name = backend.me.username;
       addLink(name.length > 11 ? name.slice(0, 10) + '…' : name, full ? 104 : 78, () => dialogs.openAccount());
     } else {
-      addLink('Sign In', 78, () => openAccountOrAuth('in'));
+      addLink('Join', 64, () => openAccountOrAuth());
     }
     addLink('Request', 96, () => window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'));
     if (W >= 480) addLink('Scores', 78, () => scrollTo(anchors.board));
@@ -1314,7 +1314,7 @@ function startHub(logoImage) {
       g.fillStyle = C.yellow;  g.fillText('Leaderboard', 0, 36);
       g.font = `italic 18px ${TIMES}`;
       g.fillStyle = '#ffffff';
-      g.fillText('Sign in and play to climb — XP for playing, diamonds for the shop!', 0, 68);
+      g.fillText('Grab a username and play to climb — XP for playing, diamonds for the shop!', 0, 68);
     });
     place(head, 0, y, 84); page.add(head);
     y += 84 + 14;
@@ -1422,12 +1422,11 @@ function startHub(logoImage) {
         w: 210, down: !avail,
         act: avail ? claimDailyFlow : () => toast('Already claimed today — come back tomorrow!'),
       }];
-      if (!me.hasEmail) specs.push({ label: 'Add email to join the board', w: 240, down: true, act: () => dialogs.openAddEmail() });
       if (backend.isStaff()) specs.push({ label: '+ Add a game', w: 150, act: () => dialogs.openAddGame() });
       specs.push({ label: 'Members', w: 120, act: () => dialogs.openMembers() });
       y = buttonRow(specs, y, cw, wide);
     } else if (backend.configured) {
-      y = buttonRow([{ label: 'Sign up to join the board!', w: 260, act: () => openAccountOrAuth('up') }], y, cw, wide);
+      y = buttonRow([{ label: 'Pick a username to join the board!', w: 290, act: () => openAccountOrAuth() }], y, cw, wide);
     }
     return y;
   }

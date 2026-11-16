@@ -376,12 +376,12 @@ update public.profiles p
 -- Leaderboards only list players who added an email.
 create or replace view public.hub_board_weekly with (security_invoker = true) as
   select username, rank, weekly_xp as score from public.profiles
-  where week_key = public.hub_week_key() and weekly_xp > 0 and contact_email is not null
+  where week_key = public.hub_week_key() and weekly_xp > 0
   order by weekly_xp desc, username limit 100;
 
 create or replace view public.hub_board_alltime with (security_invoker = true) as
   select username, rank, xp as score from public.profiles
-  where xp > 0 and contact_email is not null
+  where xp > 0
   order by xp desc, username limit 100;
 
 grant select on public.hub_board_weekly, public.hub_board_alltime to anon, authenticated;

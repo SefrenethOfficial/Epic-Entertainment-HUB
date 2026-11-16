@@ -312,6 +312,8 @@ dialog.win::backdrop { background: rgba(0, 0, 32, .55); }
 .win-btn:disabled { color: #808080; text-shadow: 1px 1px #fff; cursor: default; }
 .win-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .win-actions.stack { flex-direction: column; }
+.win-link { align-self: center; margin-top: 2px; background: none; border: 0; padding: 2px; color: var(--navy, #000080); font-size: 12px; text-decoration: underline; cursor: pointer; }
+.win-link:hover { color: #0000ee; }
 .win-status { min-height: 1.3em; font-size: 13px; }
 .win-status.error { color: #B00000; font-weight: bold; }
 .win-who { font: 20px var(--times); }

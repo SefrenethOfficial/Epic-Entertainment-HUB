@@ -60,93 +60,54 @@ async function run(form, status, busyText, action) {
   }
 }
 
-/* ------------------------------ sign in / up ------------------------------ */
+/* ------------------------------ pick a username ------------------------------ */
 
-export function openAuth(startWith = 'in') {
-  let mode = startWith;
-  const username = el('input', { type: 'text', name: 'username', autocomplete: 'username', maxLength: 40, spellcheck: false });
-  const email = el('input', { type: 'email', name: 'email', autocomplete: 'email' });
-  const password = el('input', { type: 'password', name: 'password', required: true, minLength: 8 });
-  const userField = field('Username', username, '3-20 letters, numbers or underscores');
-  const emailField = field('Email (optional)', email, 'Add one to join the leaderboards — or add it later.');
-  const passField = field('Password', password, 'At least 8 characters');
-  const userLabel = userField.querySelector('span');
+export function openAuth() {
+  const username = el('input', { type: 'text', name: 'username', autocomplete: 'off', maxLength: 20, spellcheck: false, placeholder: 'e.g. TacoFan99' });
   const status = el('p', { className: 'win-status', role: 'alert' });
-  const submit = el('button', { type: 'submit', className: 'win-btn primary' });
-  const tabIn = el('button', { type: 'button', className: 'win-tab', onclick: () => setMode('in') }, 'Sign In');
-  const tabUp = el('button', { type: 'button', className: 'win-tab', onclick: () => setMode('up') }, 'Sign Up');
-
-  function setMode(next) {
-    mode = next;
-    const up = mode === 'up';
-    tabIn.setAttribute('aria-pressed', String(!up));
-    tabUp.setAttribute('aria-pressed', String(up));
-    userLabel.textContent = up ? 'Username' : 'Username or email';
-    userField.querySelector('small').hidden = !up;     // the 3-20 hint only when signing up
-    username.maxLength = up ? 20 : 254;
-    emailField.hidden = !up;                            // email is a sign-up field only
-    passField.querySelector('small').hidden = !up;
-    password.autocomplete = up ? 'new-password' : 'current-password';
-    submit.textContent = up ? 'Create account' : 'Sign In';
-    status.textContent = '';
-  }
 
   const form = el('form', { className: 'win-form', onsubmit: (e) => {
     e.preventDefault();
-    run(form, status, mode === 'up' ? 'Creating your account…' : 'Signing in…', async () => {
-      if (mode === 'up') {
-        const result = await backend.signUp({ username: username.value.trim(), email: email.value.trim(), password: password.value });
-        if (result.needsConfirmation) {
-          const to = result.email;
-          form.replaceChildren(el('p', {}, to
-            ? 'Almost there! We sent a confirmation link to ' + to + '. Click it, then come back and sign in.'
-            : 'Your account is ready — sign in with your username.'),
-            el('div', { className: 'win-actions' }, el('button', { type: 'button', className: 'win-btn primary', onclick: () => dlg.close() }, 'OK')));
-          return;
-        }
-      } else {
-        await backend.signIn({ identifier: username.value.trim(), password: password.value });
-      }
+    run(form, status, 'Setting you up…', async () => {
+      await backend.claimUsername(username.value.trim());
       dlg.close();
-      hooks.toast('Welcome, ' + backend.me.username + '! Rank: ' + RANK_NAMES[backend.me.rank]);
-    });
-  } },
-    el('div', { className: 'win-tabs' }, tabIn, tabUp),
-    userField,
-    emailField,
-    passField,
-    status,
-    el('div', { className: 'win-actions' }, submit),
-  );
-  const dlg = openWindow('Epic Entertainment HUB - Account', form);
-  setMode(mode);
-  username.focus();
-}
-
-/* ------------------------- add email (leaderboards) ----------------------- */
-
-export function openAddEmail() {
-  if (!backend.me) return openAuth();
-  const email = el('input', { type: 'email', required: true, autocomplete: 'email', value: backend.me.email || '' });
-  const status = el('p', { className: 'win-status', role: 'alert' });
-  const form = el('form', { className: 'win-form', onsubmit: (e) => {
-    e.preventDefault();
-    run(form, status, 'Saving…', async () => {
-      await backend.addEmail(email.value.trim());
-      dlg.close();
-      hooks.toast("Email added — you're on the leaderboards now!");
+      hooks.toast("Welcome, " + backend.me.username + "! You're all set.");
       hooks.gamesChanged();
     });
   } },
-    el('p', { className: 'win-small' }, 'Add an email to show up on the leaderboards. It just keeps the boards fair — no spam.'),
-    field('Email', email),
+    el('p', { className: 'win-small' }, "Pick a username and you're in — no email, no password. It's how you show up in comments and on the leaderboards."),
+    field('Username', username, '3-20 letters, numbers or underscores'),
     status,
-    el('div', { className: 'win-actions' },
-      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel'),
-      el('button', { type: 'submit', className: 'win-btn primary' }, 'Save')),
+    el('div', { className: 'win-actions' }, el('button', { type: 'submit', className: 'win-btn primary' }, 'Let’s go')),
+    el('button', { type: 'button', className: 'win-link', onclick: () => ownerMode() }, 'Owner sign-in'),
   );
-  const dlg = openWindow('Join the Leaderboards', form, 360);
-  email.focus();
+
+  // The owner's email + password way in — tucked behind a link.
+  function ownerMode() {
+    const id = el('input', { type: 'text', autocomplete: 'username', placeholder: 'Email or username' });
+    const pw = el('input', { type: 'password', autocomplete: 'current-password', required: true });
+    const ostatus = el('p', { className: 'win-status', role: 'alert' });
+    const oform = el('form', { className: 'win-form', onsubmit: (e) => {
+      e.preventDefault();
+      run(oform, ostatus, 'Signing in…', async () => {
+        await backend.signIn({ identifier: id.value.trim(), password: pw.value });
+        dlg.close();
+        hooks.toast('Welcome back, ' + backend.me.username + '! Rank: ' + RANK_NAMES[backend.me.rank]);
+        hooks.gamesChanged();
+      });
+    } },
+      field('Email or username', id),
+      field('Password', pw),
+      ostatus,
+      el('div', { className: 'win-actions' }, el('button', { type: 'submit', className: 'win-btn primary' }, 'Sign In')),
+      el('button', { type: 'button', className: 'win-link', onclick: () => { dlg.querySelector('.win-body').replaceChildren(form); username.focus(); } }, 'Back'),
+    );
+    dlg.querySelector('.win-body').replaceChildren(oform);
+    id.focus();
+  }
+
+  const dlg = openWindow('Join the HUB', form);
+  username.focus();
 }
 
 /* -------------------------------- account -------------------------------- */
@@ -156,13 +117,11 @@ export function openAccount() {
   if (!me) return openAuth();
   const body = el('div', { className: 'win-form' },
     el('p', { className: 'win-who' }, el('strong', {}, me.username), ' ', el('span', { className: 'rank rank-' + me.rank }, RANK_NAMES[me.rank])),
-    el('p', { className: 'win-small' }, me.hasEmail ? me.email : 'No email added — add one to join the leaderboards.'),
     el('p', { className: 'win-stats' },
       el('strong', {}, (me.xp || 0).toLocaleString()), ' XP',
       '  •  ', el('strong', {}, (me.diamonds || 0).toLocaleString()), ' diamonds',
       '  •  ', el('strong', {}, String(me.streak || 0)), ' day streak'),
     el('div', { className: 'win-actions stack' },
-      me.hasEmail ? null : el('button', { type: 'button', className: 'win-btn primary', onclick: () => { dlg.close(); openAddEmail(); } }, 'Add email for leaderboards…'),
       backend.isStaff() ? el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openAddGame(); } }, 'Add a game…') : null,
       el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openMembers(); } }, 'Members…'),
       el('button', { type: 'button', className: 'win-btn', onclick: async () => {

@@ -6,11 +6,9 @@
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 
 export const USERNAME_RULE = /^[A-Za-z0-9_]{3,20}$/;
-export const EMAIL_RULE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-// Accounts can be made without an email. Behind the scenes Supabase still needs
-// one, so username-only accounts get a deterministic address on this throwaway
-// domain (.invalid never resolves). A real email in contact_email is what unlocks
-// the leaderboards.
+// Players sign in with just a username (anonymous auth). The owner can still get
+// in by username; older username accounts map to a deterministic address on this
+// throwaway domain (.invalid never resolves), so owner sign-in accepts both.
 const NOEMAIL_DOMAIN = 'noemail.epichub.invalid';
 const syntheticEmail = (username) => username.toLowerCase() + '@' + NOEMAIL_DOMAIN;
 export const MAX_HTML_BYTES = 20 * 1024 * 1024;
@@ -19,7 +17,7 @@ export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'
 
 export const configured = Boolean(SUPABASE_URL && SUPABASE_KEY);
 
-// { id, email, username, rank } while signed in, otherwise null.
+// { id, username, rank, xp, ... } while signed in, otherwise null.
 export let me = null;
 export const isStaff = () => Boolean(me && (me.rank === 'owner' || me.rank === 'admin'));
 
@@ -37,6 +35,7 @@ function fail(error, fallback) {
     [/password should be at least/i, 'Password is too short.'],
     [/database error saving new user/i, 'That username is taken or not allowed. Try another one.'],
     [/rate limit/i, 'Too many tries. Wait a minute and try again.'],
+    [/anonymous.*disabled|signups? not allowed.*anonymous|anonymous_provider_disabled/i, 'Usernames aren’t switched on yet (owner: enable Anonymous sign-ins in Supabase → Authentication).'],
     [/row-level security|not authorized|permission denied/i, 'Your rank is not allowed to do that.'],
     [/failed to fetch|networkerror|load failed/i, 'Could not reach the server. It may be asleep: free Supabase projects pause after a quiet week.'],
     [/mime type|not supported/i, 'That file type is not allowed.'],
@@ -59,13 +58,10 @@ function loadLibrary() {
 async function loadProfile(user) {
   if (!user) { me = null; return; }
   const { data } = await db.from('profiles')
-    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward, contact_email')
+    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward')
     .eq('id', user.id).maybeSingle();
-  const contact = (data && data.contact_email) || null;
   me = {
     id: user.id,
-    email: contact,                    // the email the player added, or null
-    hasEmail: Boolean(contact),        // true once they can appear on the boards
     username: (data && data.username) || 'player',
     rank: (data && data.rank) || 'player',
     xp: (data && data.xp) || 0,
@@ -118,31 +114,23 @@ function need() {
 
 /* ------------------------------ accounts ------------------------------ */
 
-// Email is optional. Leave it blank for a username-only account; a real email
-// can be added later (addEmail) to join the leaderboards.
-export async function signUp({ username, email, password }) {
+// Making an account is just picking a username. Behind the scenes this is an
+// anonymous sign-in, so there's no email and no password — the username IS the
+// account. It earns XP, posts comments and shows up on the leaderboards.
+export async function claimUsername(username) {
   need();
   username = (username || '').trim();
-  email = (email || '').trim();
   if (!USERNAME_RULE.test(username)) throw new Error('Usernames are 3-20 letters, numbers or underscores.');
-  if (password.length < 8) throw new Error('Use a password with at least 8 characters.');
-  if (email && !EMAIL_RULE.test(email)) throw new Error('That email looks off. Leave it blank to skip it for now.');
   const taken = await db.from('profiles').select('id').ilike('username', username.replace(/_/g, '\\_')).limit(1);
-  if (taken.data && taken.data.length) throw new Error('That username is taken.');
-  const { data, error } = await db.auth.signUp({
-    email: email || syntheticEmail(username),
-    password,
-    options: { data: { username }, emailRedirectTo: location.origin + location.pathname },
-  });
+  if (taken.data && taken.data.length) throw new Error('That username is taken — try another.');
+  const { data, error } = await db.auth.signInAnonymously({ options: { data: { username } } });
   if (error) throw fail(error);
-  // No session means the project wants the email address confirmed first.
-  if (!data.session) return { needsConfirmation: true, email };
-  await loadProfile(data.session.user);
+  await loadProfile(data.user);
   announce();
-  return { needsConfirmation: false, email };
 }
 
-// Sign in with either a username (any account) or an email (accounts that added one).
+// The owner's private way back in — their existing email + password account.
+// Everyone else uses claimUsername; this keeps owner/admin access protected.
 export async function signIn({ identifier, password }) {
   need();
   identifier = (identifier || '').trim();
@@ -150,19 +138,6 @@ export async function signIn({ identifier, password }) {
   const { data, error } = await db.auth.signInWithPassword({ email, password });
   if (error) throw fail(error);
   await loadProfile(data.user);
-  announce();
-}
-
-// Add (or change) the email that puts a player on the leaderboards.
-export async function addEmail(email) {
-  need();
-  if (!me) throw new Error('Sign in first.');
-  email = (email || '').trim();
-  if (!EMAIL_RULE.test(email)) throw new Error('That email looks off — check it and try again.');
-  const { error } = await db.from('profiles').update({ contact_email: email }).eq('id', me.id);
-  if (error) throw fail(error);
-  me.email = email;
-  me.hasEmail = true;
   announce();
 }
 
