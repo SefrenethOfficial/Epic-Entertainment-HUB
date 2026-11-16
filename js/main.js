@@ -308,6 +308,10 @@ async function claimDailyFlow() {
   if (hub) hub.rebuild();
 }
 
+// A hidden game, not in the registry. Loaded from a local launcher that pulls
+// the rest from its own host, and run sandboxed like any uploaded game.
+const SECRET_GAME = { id: 'saul-run', title: '???', fileUrl: 'games/saul.html' };
+
 async function openGame(game) {
   if (playing === game) return;
   const token = ++openToken;
@@ -742,6 +746,7 @@ function startHub(logoImage) {
   let interactives = [];
   let updaters = [];
   let hovered = null;
+  let logoClicks = 0;
   const pointer = { x: 0, y: 0, nx: 0, ny: 0, inside: false };
 
   /* ---------- building blocks ---------- */
@@ -934,6 +939,7 @@ function startHub(logoImage) {
     });
     interactive(disc, 'page', () => {
       if (spinT >= 1) { spinFrom = spin; spinT = REDUCED ? 1 : 0; }
+      if (++logoClicks >= 5) { logoClicks = 0; openGame(SECRET_GAME); return; }
       toast('Awesome!!!');
     });
 
@@ -1841,6 +1847,7 @@ function startHub(logoImage) {
   if (location.search.includes('secret-test')) {                            // opt-in test seam
     window.__secret = secret;
     window.__audio = () => ({ musicPaused: music.paused, secretPlaying: !secretSong.paused, secretActive });
+    window.__openSecret = () => openGame(SECRET_GAME);
   }
   requestAnimationFrame(tick);
   return { rebuild: build };
