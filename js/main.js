@@ -819,6 +819,7 @@ function startHub(logoImage, doorImage) {
   }
 
   let W = 0, H = 0, total = 0, maxScroll = 0;
+  let cLeft = 0, cTop = 0;   // canvas box offset in the viewport (sidebar pushes it right)
   let scroll = 0, scrollTarget = 0;
   const anchors = { top: 0, games: 0, board: 0 };
   let interactives = [];
@@ -1637,6 +1638,7 @@ function startHub(logoImage, doorImage) {
     const rect = canvas.getBoundingClientRect();
     W = Math.round(rect.width) || canvas.clientWidth || innerWidth;
     H = Math.round(rect.height) || canvas.clientHeight || innerHeight;
+    cLeft = rect.left; cTop = rect.top;   // pointer events are viewport-relative; subtract this
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));  // reapply: zoom can change it
     renderer.setSize(W, H, false);
     camera.aspect = W / H;
@@ -1711,10 +1713,11 @@ function startHub(logoImage, doorImage) {
   }
 
   function setPointer(e) {
-    pointer.x = e.clientX;
-    pointer.y = e.clientY;
-    pointer.nx = (e.clientX / W) * 2 - 1;
-    pointer.ny = -((e.clientY / H) * 2 - 1);
+    const px = e.clientX - cLeft, py = e.clientY - cTop;
+    pointer.x = px;
+    pointer.y = py;
+    pointer.nx = (px / W) * 2 - 1;
+    pointer.ny = -((py / H) * 2 - 1);
     pointer.inside = true;
   }
 
@@ -1761,7 +1764,7 @@ function startHub(logoImage, doorImage) {
     const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -Z);
     const hitPt = new THREE.Vector3();
     function point(e) {
-      nd.set((e.clientX / W) * 2 - 1, -(e.clientY / H) * 2 + 1);
+      nd.set(((e.clientX - cLeft) / W) * 2 - 1, -((e.clientY - cTop) / H) * 2 + 1);
       ray.setFromCamera(nd, camera);
       return ray.ray.intersectPlane(plane, hitPt) ? hitPt : null;
     }
