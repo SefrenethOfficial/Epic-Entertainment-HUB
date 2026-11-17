@@ -317,6 +317,31 @@ export function openEditGame(game) {
   title.focus();
 }
 
+/* --------------------------------- news ---------------------------------- */
+
+export function openNews(current, onSave) {
+  if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can edit the news.');
+  const box = el('textarea', { rows: 6, value: current || '', spellcheck: false });
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Saving…', async () => {
+      await onSave(box.value);
+      dlg.close();
+      hooks.toast('News updated!');
+    });
+  } },
+    el('p', { className: 'win-small' }, 'One headline per line. They scroll across the ticker at the bottom of the screen for everyone.'),
+    box,
+    status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel'),
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Save news')),
+  );
+  const dlg = openWindow('Edit the News', form, 420);
+  box.focus();
+}
+
 /* -------------------------------- comments ------------------------------- */
 
 function timeAgo(iso) {

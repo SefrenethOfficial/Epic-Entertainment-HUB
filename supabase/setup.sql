@@ -458,3 +458,24 @@ grant select on public.hub_board_epic to anon, authenticated;
 alter table public.games add column if not exists image_url text;
 grant insert (image_url) on public.games to authenticated;
 grant update (image_url) on public.games to authenticated;
+
+-- ------------------------------------------------- site settings (news)
+-- Key/value site settings. The news ticker lives here under key 'news'.
+-- Everyone can read; Owners/Admins can write.
+create table if not exists public.settings (
+  key text primary key,
+  value text,
+  updated_at timestamptz not null default now()
+);
+alter table public.settings enable row level security;
+
+drop policy if exists "settings public read" on public.settings;
+create policy "settings public read" on public.settings for select using (true);
+
+drop policy if exists "staff write settings" on public.settings;
+create policy "staff write settings" on public.settings for all to authenticated
+  using (public.my_rank() in ('owner', 'admin'))
+  with check (public.my_rank() in ('owner', 'admin'));
+
+grant select on public.settings to anon, authenticated;
+grant insert, update on public.settings to authenticated;

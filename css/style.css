@@ -334,6 +334,19 @@ dialog.win::backdrop { background: rgba(0, 0, 32, .55); }
 
 .win-stats { font: 14px var(--sans); color: #000; background: #fff; padding: 7px 9px; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf; }
 
+/* news ticker — fixed at the bottom, over the canvas */
+#newsbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 500; height: 30px; display: flex; align-items: stretch;
+  background: #000; border-top: 2px solid var(--yellow, #FFFF00); font-family: var(--sans); pointer-events: none; }
+#newsbar .news-flag { display: flex; align-items: center; padding: 0 12px; background: #CC0000; color: #fff; font-weight: bold; font-size: 13px; letter-spacing: 1px; white-space: nowrap; }
+#newsbar .news-viewport { flex: 1; overflow: hidden; display: flex; align-items: center; }
+#newsbar .news-track { display: inline-flex; white-space: nowrap; will-change: transform; animation: news-scroll 40s linear infinite; }
+#newsbar .news-track:hover { animation-play-state: paused; }
+#newsbar .news-track span { color: var(--yellow, #FFFF00); font-size: 14px; font-weight: bold; padding: 0 2px; }
+#newsbar .news-track b { color: #00FFFF; font-weight: bold; padding: 0 22px; }   /* separators */
+@keyframes news-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+#newsbar .news-edit, #newsbar #news-edit { pointer-events: auto; width: 34px; border: 0; cursor: pointer; background: var(--navy, #000080); color: #fff; font-size: 15px; }
+#newsbar #news-edit:hover { background: #1084D0; }
+
 /* the timer */
 .ls-timer {
   position: fixed; left: 18px; bottom: 18px; z-index: 9000;

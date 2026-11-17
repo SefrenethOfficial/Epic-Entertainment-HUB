@@ -291,6 +291,23 @@ export async function editGame(game, { title, description, tags, url, imageFile,
   }
 }
 
+/* -------------------------------- news --------------------------------- */
+
+// The scrolling news ticker. Everyone reads it; Owners/Admins edit it.
+export async function getNews() {
+  if (!db) return null;
+  const { data, error } = await db.from('settings').select('value').eq('key', 'news').maybeSingle();
+  if (error) return null;
+  return data ? data.value : null;
+}
+
+export async function setNews(text) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can edit the news.');
+  const { error } = await db.from('settings').upsert({ key: 'news', value: String(text).slice(0, 2000), updated_at: new Date().toISOString() });
+  if (error) throw fail(error);
+}
+
 /* ------------------------------ play counts ---------------------------- */
 
 // Map of game key -> play count, for sorting the list. Readable signed out.

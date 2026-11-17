@@ -1965,8 +1965,39 @@ function loadImage(src) {
   });
 }
 
+/* ---------- news ticker ---------- */
+
+const DEFAULT_NEWS = 'Welcome to the Epic Entertainment HUB!\nNew games added all the time\nClimb the leaderboards — XP, diamonds and Epic Points';
+let currentNews = '';
+
+function renderNews(text) {
+  if (text != null) currentNews = text;
+  const bar = $('newsbar'), track = $('news-track');
+  if (!bar || !track) return;
+  const msgs = (currentNews || DEFAULT_NEWS).split('\n').map((s) => s.trim()).filter(Boolean);
+  if (!msgs.length) { bar.hidden = true; return; }
+  const run = () => msgs.flatMap((m) => {
+    const s = document.createElement('span'); s.textContent = m;
+    const sep = document.createElement('b'); sep.textContent = '✦';
+    return [s, sep];
+  });
+  track.replaceChildren(...run(), ...run());   // duplicated for a seamless -50% loop
+  bar.hidden = false;
+}
+
+function syncNewsEdit() {
+  const btn = $('news-edit');
+  if (btn) btn.hidden = !backend.isStaff();
+}
+
 async function boot() {
   renderQuickList();
+  renderNews(null);     // show the default straight away; the saved text loads below
+  const newsBtn = $('news-edit');
+  if (newsBtn) newsBtn.addEventListener('click', () => dialogs.openNews(currentNews || DEFAULT_NEWS, async (text) => {
+    await backend.setNews(text);
+    renderNews(text);
+  }));
   loader.show('Loading the HUB', 'assets/loading-invasion.jpg');
   const started = performance.now();
   try {
@@ -1981,8 +2012,9 @@ async function boot() {
   }
   // Accounts load in the background so a sleeping server never blocks the page.
   dialogs.setHooks({ toast, gamesChanged: refreshGames });
-  backend.onAccountChange(() => { renderQuickList(); if (hub) hub.rebuild(); });
-  backend.start().then(() => Promise.all([refreshGames(), refreshBoard()])).then(() => {
+  backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); if (hub) hub.rebuild(); });
+  backend.start().then(() => Promise.all([refreshGames(), refreshBoard(), backend.getNews().then(renderNews)])).then(() => {
+    syncNewsEdit();
     const linked = gameFromHash();           // a share link to a HUB-added game
     if (linked && !playing) openGame(linked);
   });
