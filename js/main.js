@@ -312,23 +312,65 @@ async function claimDailyFlow() {
 // the rest from its own host, and run sandboxed like any uploaded game.
 const SECRET_GAME = { id: 'saul-run', title: '???', fileUrl: 'games/saul.html' };
 
+const SAVE_PREFIX = 'eehub:save:';         // per-game save, kept in the HUB's own storage
+const MAX_SAVE_BYTES = 1024 * 1024;        // cap one game's save at ~1 MB
+
 // Slipped into the top of every uploaded game. A sandboxed game runs in an
 // "opaque" origin where localStorage / sessionStorage / document.cookie THROW
 // the moment they're touched. Engine loaders (Unity and friends) read those
 // while starting up and die on the exception — the black screen some uploads
-// showed. These in-memory stand-ins are installed ONLY if the real ones throw,
-// so normal pages are untouched and the game starts instead.
-const STORAGE_SHIM = `<script>(function(){
-  function mem(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null;},setItem:function(k,v){s[k]=String(v);},removeItem:function(k){delete s[k];},clear:function(){s={};},key:function(i){return Object.keys(s)[i]||null;},get length(){return Object.keys(s).length;}};}
-  function guard(name){try{window[name].getItem("__t__");}catch(e){try{Object.defineProperty(window,name,{value:mem(),configurable:true});}catch(_){}}}
-  guard("localStorage");guard("sessionStorage");
+// showed. So we install stand-ins only if the real ones throw.
+//
+// localStorage is also where most games save. The opaque origin has none that
+// persists, so we seed the stand-in from the game's saved data (passed in) and
+// mirror every write back to the HUB via postMessage, which stores it. Next
+// time the game opens, it's seeded again — so the game saves. Reads stay
+// synchronous (the seed is already in memory), and the game still can't reach
+// the HUB: it only posts its own save out through a one-way channel.
+function buildShim(saveData) {
+  const seed = JSON.stringify(saveData || {}).replace(/</g, '\\u003c');
+  return `<script>(function(){
+  var SEED = ${seed};
+  function mem(init, persist){
+    var s = init || {};
+    return {
+      getItem:function(k){k=String(k);return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null;},
+      setItem:function(k,v){s[String(k)]=String(v);persist&&persist(s);},
+      removeItem:function(k){delete s[String(k)];persist&&persist(s);},
+      clear:function(){for(var k in s)delete s[k];persist&&persist(s);},
+      key:function(i){return Object.keys(s)[i]||null;},
+      get length(){return Object.keys(s).length;}
+    };
+  }
+  var timer=null, latest=null;
+  function persist(s){ latest=s; if(timer)return; timer=setTimeout(function(){timer=null;try{parent.postMessage({__eehub:"save",data:latest},"*");}catch(e){}},300); }
+  function guard(name,init,save){try{window[name].getItem("__t__");}catch(e){try{Object.defineProperty(window,name,{value:mem(init,save),configurable:true});}catch(_){}}}
+  guard("localStorage",SEED,persist);
+  guard("sessionStorage",{},null);
   try{void document.cookie;}catch(e){try{Object.defineProperty(document,"cookie",{configurable:true,get:function(){return"";},set:function(){}});}catch(_){}}
 })();<\/script>`;
+}
 
-function injectShim(html) {
-  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + STORAGE_SHIM);
-  if (/<script/i.test(html)) return html.replace(/<script/i, STORAGE_SHIM + '<script');
-  return STORAGE_SHIM + html;
+function injectShim(html, saveData) {
+  const shim = buildShim(saveData);
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + shim);
+  if (/<script/i.test(html)) return html.replace(/<script/i, shim + '<script');
+  return shim + html;
+}
+
+// Persist a game's save when its sandboxed frame posts one out.
+addEventListener('message', (e) => {
+  if (!playing || !playing.fileUrl || e.source !== frame.contentWindow) return;
+  const d = e.data;
+  if (!d || d.__eehub !== 'save' || !d.data || typeof d.data !== 'object') return;
+  try {
+    const json = JSON.stringify(d.data);
+    if (json.length <= MAX_SAVE_BYTES) localStorage.setItem(SAVE_PREFIX + playing.id, json);
+  } catch (_) {}
+});
+
+function loadSave(id) {
+  try { return JSON.parse(localStorage.getItem(SAVE_PREFIX + id) || '{}') || {}; } catch (_) { return {}; }
 }
 
 async function openGame(game) {
@@ -367,7 +409,7 @@ async function openGame(game) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       let html = await res.text();
       if (token !== openToken) return;
-      html = injectShim(html);
+      html = injectShim(html, loadSave(game.id));
       blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
       frame.src = blobUrl;
     } catch (err) {
