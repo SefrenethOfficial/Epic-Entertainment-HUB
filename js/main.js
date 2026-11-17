@@ -1651,7 +1651,9 @@ function startHub(logoImage, doorImage) {
     // When the left sidebar is showing, the canvas starts to the right of it
     // (rect.left > 0). Hug the content against the sidebar instead of leaving a
     // gap beside it — any slack goes on the right, not the left.
-    const offsetX = rect.left > 1 ? -Math.round((W - cw) / 2) : 0;
+    const SIDE_GAP = 40; // small breathing room between sidebar and content
+    const slack = (W - cw) / 2;
+    const offsetX = rect.left > 1 ? -Math.round(Math.max(slack - SIDE_GAP, 0)) : 0;
     page.position.x = offsetX;
 
     buildNav(cw, wide);
