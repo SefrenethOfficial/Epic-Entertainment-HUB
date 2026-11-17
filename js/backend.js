@@ -58,7 +58,7 @@ function loadLibrary() {
 async function loadProfile(user) {
   if (!user) { me = null; return; }
   const { data } = await db.from('profiles')
-    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward')
+    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward, epic_points')
     .eq('id', user.id).maybeSingle();
   me = {
     id: user.id,
@@ -69,6 +69,7 @@ async function loadProfile(user) {
     diamonds: (data && data.diamonds) || 0,
     streak: (data && data.streak) || 0,
     lastReward: (data && data.last_reward) || null,
+    epicPoints: Number((data && data.epic_points) || 0),
   };
 }
 
@@ -347,10 +348,18 @@ export async function deleteComment(id) {
 // Fetch the top players. scope is 'week' or 'all'. Readable even signed out.
 export async function leaderboard(scope) {
   if (!db) return [];
-  const view = scope === 'all' ? 'hub_board_alltime' : 'hub_board_weekly';
+  const view = scope === 'all' ? 'hub_board_alltime' : scope === 'epic' ? 'hub_board_epic' : 'hub_board_weekly';
   const { data, error } = await db.from(view).select('username, rank, score');
   if (error) throw fail(error);
-  return data;
+  // bigint (Epic Points) can arrive as a string from PostgREST — coerce to a number.
+  return data.map((r) => ({ ...r, score: Number(r.score) || 0 }));
+}
+
+// Report the player's best Epic Points from the clicker (only ever increases).
+export async function reportEpic(points) {
+  if (!db || !me || !(points > 0)) return;
+  await db.rpc('hub_set_epic', { p_points: Math.floor(points) }).then(() => {}, () => {});
+  me.epicPoints = Math.max(me.epicPoints || 0, Math.floor(points));
 }
 
 // Report active play time (seconds) and bank the XP / diamonds it earned.

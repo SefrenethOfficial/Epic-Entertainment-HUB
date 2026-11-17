@@ -257,7 +257,7 @@ let blobUrl = null;
 let allGames = [...GAMES];
 
 // Leaderboard data, loaded lazily. null = not fetched yet.
-const board = { scope: 'week', week: null, all: null };
+const board = { scope: 'week', week: null, all: null, epic: null };
 
 /* ---- active play time: fuels XP (1/min) and diamonds (1/10min) ---- */
 // Time only counts while a game is open, the tab is visible, and the window
@@ -288,11 +288,11 @@ addEventListener('pagehide', flushActiveTime);
 async function refreshBoard() {
   if (!backend.configured) return;
   try {
-    const [week, all] = await Promise.all([backend.leaderboard('week'), backend.leaderboard('all')]);
-    board.week = week; board.all = all;
+    const [week, all, epic] = await Promise.all([backend.leaderboard('week'), backend.leaderboard('all'), backend.leaderboard('epic')]);
+    board.week = week; board.all = all; board.epic = epic;
   } catch (err) {
     console.error('Could not load the leaderboard', err);
-    board.week = board.week || []; board.all = board.all || [];
+    board.week = board.week || []; board.all = board.all || []; board.epic = board.epic || [];
   }
   if (hub) hub.rebuild();
 }
@@ -744,7 +744,7 @@ let hub = null;      // set once the 3D interface is running
 let lastTime = 0;
 let tick = () => {};
 
-function startHub(logoImage) {
+function startHub(logoImage, doorImage) {
   const canvas = $('stage');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -762,6 +762,14 @@ function startHub(logoImage) {
   logoTex.colorSpace = THREE.SRGBColorSpace;
   logoTex.anisotropy = maxAniso;
   logoTex.needsUpdate = true;
+
+  let doorTex = null;
+  if (doorImage) {
+    doorTex = new THREE.Texture(doorImage);
+    doorTex.colorSpace = THREE.SRGBColorSpace;
+    doorTex.anisotropy = maxAniso;
+    doorTex.needsUpdate = true;
+  }
 
   let W = 0, H = 0, total = 0, maxScroll = 0;
   let scroll = 0, scrollTarget = 0;
@@ -1334,6 +1342,8 @@ function startHub(logoImage) {
     const topN = wide ? 10 : 8;
     const shown = rows ? rows.slice(0, topN) : [];
     const myName = backend.me ? backend.me.username : null;
+    const scopeTitle = board.scope === 'week' ? 'Weekly' : board.scope === 'epic' ? 'Epic Points' : 'All-Time';
+    const unit = board.scope === 'epic' ? 'EP' : 'XP';
 
     // heading
     const head = panel(cw, 84, (g) => {
@@ -1343,20 +1353,21 @@ function startHub(logoImage) {
       g.fillStyle = C.yellow;  g.fillText('Leaderboard', 0, 36);
       g.font = `italic 18px ${TIMES}`;
       g.fillStyle = '#ffffff';
-      g.fillText('Grab a username and play to climb — XP for playing, diamonds for the shop!', 0, 68);
+      g.fillText('Grab a username and climb — XP for playing, diamonds for the shop, Epic Points from the clicker!', 0, 68);
     });
     place(head, 0, y, 84); page.add(head);
     y += 84 + 14;
 
-    // Weekly / All-time toggle
-    const tw = 150, th = 40, tgap = 12;
-    const weekBtn = button('This Week', tw, th, { down: board.scope === 'week', size: 15 });
-    const allBtn = button('All-Time', tw, th, { down: board.scope === 'all', size: 15 });
-    place(weekBtn, -(tw + tgap) / 2, y, th);
-    place(allBtn, (tw + tgap) / 2, y, th);
-    page.add(weekBtn, allBtn);
-    interactive(weekBtn, 'page', () => { board.scope = 'week'; hub.rebuild(); }, (on) => weekBtn.userData.setHover(on));
-    interactive(allBtn, 'page', () => { board.scope = 'all'; hub.rebuild(); }, (on) => allBtn.userData.setHover(on));
+    // Weekly / All-time / Epic toggle
+    const tw = wide ? 150 : 110, th = 40, tgap = 10;
+    const defs = [['This Week', 'week'], ['All-Time', 'all'], ['Epic', 'epic']];
+    const totalW = defs.length * tw + (defs.length - 1) * tgap;
+    defs.forEach(([label, scope], i) => {
+      const btn = button(label, tw, th, { down: board.scope === scope, size: 15 });
+      place(btn, -totalW / 2 + tw / 2 + i * (tw + tgap), y, th);
+      page.add(btn);
+      interactive(btn, 'page', () => { board.scope = scope; hub.rebuild(); }, (on) => btn.userData.setHover(on));
+    });
     y += th + 14;
 
     // the ranked list, as a Windows 95 window
@@ -1371,7 +1382,7 @@ function startHub(logoImage) {
       g.fillStyle = bar; g.fillRect(6, 6, w - 12, 26);
       g.textAlign = 'left'; g.textBaseline = 'middle';
       g.fillStyle = '#fff'; g.font = `bold 14px ${SANS}`;
-      g.fillText((board.scope === 'week' ? 'Weekly' : 'All-Time') + ' Top ' + topN + '.exe', 12, 20);
+      g.fillText(scopeTitle + ' Top ' + topN + '.exe', 12, 20);
 
       const lx = 10, ly0 = 40, lwid = w - 20, lht = ph - ly0 - 10;
       bevel(g, lx, ly0, lwid, lht, { pressed: true, fill: '#fff' });
@@ -1401,7 +1412,7 @@ function startHub(logoImage) {
         g.textAlign = 'right';
         g.font = `bold 16px ${SANS}`;
         g.fillStyle = '#006400';
-        g.fillText((p.score || 0).toLocaleString() + ' XP', lx + lwid - 12, ry + rowH / 2);
+        g.fillText((p.score || 0).toLocaleString() + ' ' + unit, lx + lwid - 12, ry + rowH / 2);
       });
     });
     place(boardPanel, 0, y, winH); page.add(boardPanel);
@@ -1412,10 +1423,10 @@ function startHub(logoImage) {
       const me = backend.me;
       const myRows = rows || [];
       const pos = myRows.findIndex((p) => p.username === me.username);
-      const scoreNow = board.scope === 'week' ? me.weeklyXp : me.xp;
+      const scoreNow = board.scope === 'epic' ? (me.epicPoints || 0) : board.scope === 'week' ? me.weeklyXp : me.xp;
       const stats = [
         pos >= 0 ? 'Rank #' + (pos + 1) : 'Unranked',
-        scoreNow.toLocaleString() + ' XP',
+        scoreNow.toLocaleString() + ' ' + unit,
         me.diamonds.toLocaleString() + ' diamonds',
         me.streak + ' day streak',
       ].join('   •   ');
@@ -1502,6 +1513,27 @@ function startHub(logoImage) {
     place(foot, 0, y, h);
     page.add(foot);
     return y + h;
+  }
+
+  // A mysterious door at the very bottom. No label, no hint — click it and you
+  // leave for the hidden node.
+  function buildDoor(y, cw) {
+    if (!doorTex) return y;
+    const dh = clamp(cw * 0.42, 220, 320);
+    const dw = dh * (doorImage.width / doorImage.height);
+    const padTop = 48, padBottom = 60;
+    const cy = -(y + padTop + dh / 2);
+    const door = new THREE.Mesh(
+      new THREE.PlaneGeometry(dw, dh),
+      new THREE.MeshBasicMaterial({ map: doorTex, transparent: true, depthTest: false, opacity: 0.82 }),
+    );
+    door.renderOrder = 60;
+    door.position.set(0, cy, 0);
+    page.add(door);
+    updaters.push((t) => { door.position.y = cy + Math.sin(t * 0.8) * 3; });   // faint sway
+    interactive(door, 'page', () => { location.href = 'clicker.html'; },
+      (on) => { door.material.opacity = on ? 1 : 0.82; door.scale.setScalar(on ? 1.04 : 1); });
+    return y + padTop + dh + padBottom;
   }
 
   function buildBackground() {
@@ -1604,6 +1636,7 @@ function startHub(logoImage) {
     y = buildLeaderboard(y, cw, wide);
     y = buildRule(y + 44, cw) + 20;
     y = buildFooter(y, cw);
+    y = buildDoor(y, cw);
     total = y + 16;
     maxScroll = Math.max(0, total - H);
     scrollTarget = clamp(scrollTarget, 0, maxScroll);
@@ -1895,10 +1928,11 @@ async function boot() {
   loader.show('Loading the HUB', 'assets/loading-invasion.jpg');
   const started = performance.now();
   try {
-    const [logo] = await Promise.all([
+    const [logo, door] = await Promise.all([
       loadImage('assets/logo.png'),
+      loadImage('assets/door.png').catch(() => null),
     ]);
-    hub = startHub(logo);
+    hub = startHub(logo, door);
   } catch (err) {
     console.error('3D interface failed to start', err);
     document.body.classList.add('no-webgl');

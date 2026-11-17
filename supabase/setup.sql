@@ -431,3 +431,25 @@ create or replace view public.hub_comment_counts with (security_invoker = true) 
    where game_key is not null
    group by game_key;
 grant select on public.hub_comment_counts to anon, authenticated;
+
+-- ---------------------------------------------------------- Epic Points
+-- Epic Points come from the Epic Clicker (clicker.html). Stored as the player's
+-- best score, reported from the clicker; shown as a leaderboard stat.
+alter table public.profiles add column if not exists epic_points bigint not null default 0;
+
+create or replace function public.hub_set_epic(p_points bigint)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_points is null or p_points < 0 then return; end if;
+  update public.profiles
+     set epic_points = greatest(epic_points, least(p_points, 1000000000000000::bigint))
+   where id = auth.uid();
+end; $$;
+revoke execute on function public.hub_set_epic(bigint) from public;
+grant execute on function public.hub_set_epic(bigint) to anon, authenticated;
+
+create or replace view public.hub_board_epic with (security_invoker = true) as
+  select username, rank, epic_points as score from public.profiles
+  where epic_points > 0
+  order by epic_points desc, username limit 100;
+grant select on public.hub_board_epic to anon, authenticated;
