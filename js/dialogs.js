@@ -190,21 +190,34 @@ export function openAddGame() {
   const tags = el('input', { type: 'text', maxLength: 60, placeholder: 'Arcade, Puzzle, 2D' });
   const url = el('input', { type: 'url', placeholder: 'https://…', pattern: 'https://.+' });
   const html = el('input', { type: 'file', accept: '.html,.htm,text/html' });
+  const code = el('textarea', { rows: 5, placeholder: '<!DOCTYPE html>…', spellcheck: false });
   const image = el('input', { type: 'file', accept: backend.IMAGE_TYPES.join(',') });
+  const imageUrl = el('input', { type: 'url', placeholder: 'https://…/cover.png' });
+
   const byLink = el('input', { type: 'radio', name: 'source', checked: true });
   const byFile = el('input', { type: 'radio', name: 'source' });
+  const byCode = el('input', { type: 'radio', name: 'source' });
   const linkField = field('Game link', url, 'Where the game is hosted, e.g. a GitHub Pages address');
   const fileField = field('Game file', html, 'One self-contained .html file, up to 20 MB');
+  const codeField = field('Game HTML', code, 'Paste a self-contained HTML game, up to 20 MB');
+
+  const imgFile = el('input', { type: 'radio', name: 'imgsource', checked: true });
+  const imgLink = el('input', { type: 'radio', name: 'imgsource' });
+  const imageFileField = field('Picture file', image, 'PNG, JPG, WebP or GIF, up to 2 MB');
+  const imageUrlField = field('Picture address', imageUrl, 'A direct https:// link to an image');
   const status = el('p', { className: 'win-status', role: 'alert' });
 
   const sync = () => {
     linkField.hidden = !byLink.checked;
-    fileField.hidden = byLink.checked;
+    fileField.hidden = !byFile.checked;
+    codeField.hidden = !byCode.checked;
     url.required = byLink.checked;
-    html.required = !byLink.checked;
+    html.required = byFile.checked;
+    code.required = byCode.checked;
+    imageFileField.hidden = !imgFile.checked;
+    imageUrlField.hidden = !imgLink.checked;
   };
-  byLink.addEventListener('change', sync);
-  byFile.addEventListener('change', sync);
+  [byLink, byFile, byCode, imgFile, imgLink].forEach((r) => r.addEventListener('change', sync));
 
   const form = el('form', { className: 'win-form', onsubmit: (e) => {
     e.preventDefault();
@@ -215,8 +228,10 @@ export function openAddGame() {
         description: description.value,
         tags: tagList,
         url: byLink.checked ? url.value.trim() : '',
-        htmlFile: byLink.checked ? null : html.files[0],
-        imageFile: image.files[0] || null,
+        htmlFile: byFile.checked ? html.files[0] : null,
+        htmlText: byCode.checked ? code.value : '',
+        imageFile: imgFile.checked ? (image.files[0] || null) : null,
+        imageUrl: imgLink.checked ? imageUrl.value.trim() : '',
       });
       dlg.close();
       hooks.toast(game.title + ' was added to the HUB!');
@@ -229,10 +244,17 @@ export function openAddGame() {
     el('fieldset', { className: 'win-group' },
       el('legend', {}, 'Where is the game?'),
       el('label', { className: 'win-radio' }, byLink, ' Link to a hosted game'),
-      el('label', { className: 'win-radio' }, byFile, ' Upload an HTML file')),
+      el('label', { className: 'win-radio' }, byFile, ' Upload an HTML file'),
+      el('label', { className: 'win-radio' }, byCode, ' Paste HTML code')),
     linkField,
     fileField,
-    field('Picture (optional)', image, 'PNG, JPG, WebP or GIF, up to 2 MB'),
+    codeField,
+    el('fieldset', { className: 'win-group' },
+      el('legend', {}, 'Picture (optional)'),
+      el('label', { className: 'win-radio' }, imgFile, ' Upload a file'),
+      el('label', { className: 'win-radio' }, imgLink, ' Image address')),
+    imageFileField,
+    imageUrlField,
     status,
     el('div', { className: 'win-actions' },
       el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel'),
@@ -250,14 +272,26 @@ export function openEditGame(game) {
   const tags = el('input', { type: 'text', maxLength: 60, value: (game.tags || []).join(', ') });
   const url = el('input', { type: 'url', placeholder: 'https://…', value: game.url || '' });
   const image = el('input', { type: 'file', accept: backend.IMAGE_TYPES.join(',') });
+  const imageUrl = el('input', { type: 'url', placeholder: 'https://…/cover.png' });
+  const imgFile = el('input', { type: 'radio', name: 'imgsource', checked: true });
+  const imgLink = el('input', { type: 'radio', name: 'imgsource' });
+  const imageFileField = field('Picture file', image, 'Leave empty to keep the current one');
+  const imageUrlField = field('Picture address', imageUrl, 'A direct https:// link to an image');
   const status = el('p', { className: 'win-status', role: 'alert' });
   const isLink = Boolean(game.url);
+  const syncImg = () => { imageFileField.hidden = !imgFile.checked; imageUrlField.hidden = !imgLink.checked; };
+  imgFile.addEventListener('change', syncImg);
+  imgLink.addEventListener('change', syncImg);
 
   const form = el('form', { className: 'win-form', onsubmit: (e) => {
     e.preventDefault();
     run(form, status, 'Saving…', async () => {
       const tagList = tags.value.split(',').map((t) => t.trim().slice(0, 16)).filter(Boolean).slice(0, 3);
-      await backend.editGame(game, { title: title.value, description: description.value, tags: tagList, url: url.value, imageFile: image.files[0] || null });
+      await backend.editGame(game, {
+        title: title.value, description: description.value, tags: tagList, url: url.value,
+        imageFile: imgFile.checked ? (image.files[0] || null) : null,
+        imageUrl: imgLink.checked ? imageUrl.value.trim() : '',
+      });
       dlg.close();
       hooks.toast('Saved changes to ' + title.value.trim() + '.');
       hooks.gamesChanged();
@@ -267,13 +301,19 @@ export function openEditGame(game) {
     field('Description', description),
     field('Tags', tags, 'Up to 3, separated by commas'),
     isLink ? field('Game link', url, 'Where the game is hosted') : null,
-    field('Replace picture (optional)', image, 'Leave empty to keep the current one'),
+    el('fieldset', { className: 'win-group' },
+      el('legend', {}, 'Replace picture (optional)'),
+      el('label', { className: 'win-radio' }, imgFile, ' Upload a file'),
+      el('label', { className: 'win-radio' }, imgLink, ' Image address')),
+    imageFileField,
+    imageUrlField,
     status,
     el('div', { className: 'win-actions' },
       el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel'),
       el('button', { type: 'submit', className: 'win-btn primary' }, 'Save')),
   );
   const dlg = openWindow('Edit Game', form, 420);
+  syncImg();
   title.focus();
 }
 

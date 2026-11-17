@@ -453,3 +453,8 @@ create or replace view public.hub_board_epic with (security_invoker = true) as
   where epic_points > 0
   order by epic_points desc, username limit 100;
 grant select on public.hub_board_epic to anon, authenticated;
+
+-- Games can use an external image address instead of an uploaded picture.
+alter table public.games add column if not exists image_url text;
+grant insert (image_url) on public.games to authenticated;
+grant update (image_url) on public.games to authenticated;

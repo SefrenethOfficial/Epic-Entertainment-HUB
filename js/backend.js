@@ -176,7 +176,7 @@ function toGame(row) {
     tags: row.tags || [],
     url: row.url || null,
     fileUrl: row.file_path ? publicUrl('game-files', row.file_path) : null,
-    image: row.image_path ? publicUrl('game-images', row.image_path) : null,
+    image: row.image_path ? publicUrl('game-images', row.image_path) : (row.image_url || null),
     filePath: row.file_path,
     imagePath: row.image_path,
     accent: '#008080',
@@ -199,29 +199,35 @@ async function upload(bucket, file, name, contentType) {
   return name;
 }
 
-// game: { title, description, tags[], url? , htmlFile?, imageFile? }
-export async function addGame({ title, description, tags, url, htmlFile, imageFile }) {
+// game: { title, description, tags[], url? , htmlFile? , htmlText? , imageFile? , imageUrl? }
+// The game can come from a link, an uploaded .html file, or pasted HTML code.
+// The picture can be an uploaded file or an image address — both optional.
+export async function addGame({ title, description, tags, url, htmlFile, htmlText, imageFile, imageUrl }) {
   need();
   if (!isStaff()) throw new Error('Only Owners and Admins can add games.');
   if (!title.trim()) throw new Error('Give the game a title.');
-  if (Boolean(url) === Boolean(htmlFile)) throw new Error('Give either a link or an HTML file.');
+  htmlText = (htmlText || '').trim();
+  imageUrl = (imageUrl || '').trim();
+  const sources = [url, htmlFile, htmlText].filter(Boolean).length;
+  if (sources !== 1) throw new Error('Give one of: a link, an HTML file, or pasted HTML code.');
   if (url && !/^https:\/\/\S+$/.test(url)) throw new Error('The link has to start with https://');
   if (htmlFile) {
     if (!/\.html?$/i.test(htmlFile.name)) throw new Error('The game file has to be a .html file.');
     if (htmlFile.size > MAX_HTML_BYTES) throw new Error('The HTML file is over 20 MB.');
   }
+  if (htmlText && new Blob([htmlText]).size > MAX_HTML_BYTES) throw new Error('The HTML code is over 20 MB.');
+  if (imageFile && imageUrl) throw new Error('Give a picture file or a picture address, not both.');
   if (imageFile) {
     if (!IMAGE_TYPES.includes(imageFile.type)) throw new Error('The picture has to be a PNG, JPG, WebP or GIF.');
     if (imageFile.size > MAX_IMAGE_BYTES) throw new Error('The picture is over 2 MB.');
   }
+  if (imageUrl && !/^https:\/\/\S+$/.test(imageUrl)) throw new Error('The picture address has to start with https://');
 
   let filePath = null, imagePath = null;
   try {
     if (htmlFile) filePath = await upload('game-files', htmlFile, randomName('.html'), 'text/html');
-    if (imageFile) {
-      const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }[imageFile.type];
-      imagePath = await upload('game-images', imageFile, randomName(ext), imageFile.type);
-    }
+    else if (htmlText) filePath = await upload('game-files', new Blob([htmlText], { type: 'text/html' }), randomName('.html'), 'text/html');
+    if (imageFile) imagePath = await upload('game-images', imageFile, randomName(IMG_EXT[imageFile.type]), imageFile.type);
     const { data, error } = await db.from('games').insert({
       title: title.trim().slice(0, 40),
       description: description.trim().slice(0, 200),
@@ -229,6 +235,7 @@ export async function addGame({ title, description, tags, url, htmlFile, imageFi
       url: url || null,
       file_path: filePath,
       image_path: imagePath,
+      image_url: imagePath ? null : (imageUrl || null),
     }).select().single();
     if (error) throw fail(error);
     return toGame(data);
@@ -253,25 +260,30 @@ const IMG_EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.web
 
 // Edit an existing HUB-added game (Owners/Admins). Fields: title, description,
 // tags[], url (link games only), imageFile (optional replacement picture).
-export async function editGame(game, { title, description, tags, url, imageFile }) {
+export async function editGame(game, { title, description, tags, url, imageFile, imageUrl }) {
   need();
   if (!isStaff()) throw new Error('Only Owners and Admins can edit games.');
   if (!title.trim()) throw new Error('Give the game a title.');
+  imageUrl = (imageUrl || '').trim();
   const patch = { title: title.trim().slice(0, 40), description: description.trim().slice(0, 200), tags: tags.slice(0, 3) };
   if (game.url) {   // a link game: the URL can be changed (uploaded games keep their file)
     if (!/^https:\/\/\S+$/.test((url || '').trim())) throw new Error('The link has to start with https://');
     patch.url = url.trim();
   }
+  if (imageFile && imageUrl) throw new Error('Give a picture file or a picture address, not both.');
   if (imageFile) {
     if (!IMAGE_TYPES.includes(imageFile.type)) throw new Error('The picture has to be a PNG, JPG, WebP or GIF.');
     if (imageFile.size > MAX_IMAGE_BYTES) throw new Error('The picture is over 2 MB.');
   }
+  if (imageUrl && !/^https:\/\/\S+$/.test(imageUrl)) throw new Error('The picture address has to start with https://');
   let newImage = null;
   try {
-    if (imageFile) { newImage = await upload('game-images', imageFile, randomName(IMG_EXT[imageFile.type]), imageFile.type); patch.image_path = newImage; }
+    if (imageFile) { newImage = await upload('game-images', imageFile, randomName(IMG_EXT[imageFile.type]), imageFile.type); patch.image_path = newImage; patch.image_url = null; }
+    else if (imageUrl) { patch.image_url = imageUrl; patch.image_path = null; }
     const { data, error } = await db.from('games').update(patch).eq('id', game.rowId).select().single();
     if (error) throw fail(error);
-    if (newImage && game.imagePath) db.storage.from('game-images').remove([game.imagePath]).catch(() => {});
+    // swap away from the old stored picture only once the new one is saved
+    if ((newImage || imageUrl) && game.imagePath) db.storage.from('game-images').remove([game.imagePath]).catch(() => {});
     return toGame(data);
   } catch (err) {
     if (newImage) db.storage.from('game-images').remove([newImage]).catch(() => {});
