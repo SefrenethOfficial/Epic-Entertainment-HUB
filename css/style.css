@@ -334,6 +334,29 @@ dialog.win::backdrop { background: rgba(0, 0, 32, .55); }
 
 .win-stats { font: 14px var(--sans); color: #000; background: #fff; padding: 7px 9px; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #000, inset -2px -2px #dfdfdf; }
 
+/* left sidebar — the site's pages, full-height down the left */
+:root { --sidebar-w: 190px; --news-h: 30px; }
+#sidebar { position: fixed; left: 0; top: 0; bottom: var(--news-h); width: var(--sidebar-w); z-index: 450;
+  display: none; flex-direction: column; gap: 5px; padding: 8px; background: var(--silver); box-shadow: var(--raised); overflow-y: auto; }
+#sidebar .side-head { background: linear-gradient(90deg, var(--navy), #1084D0); color: #fff; font: bold 15px var(--sans); padding: 8px 10px; letter-spacing: 1px; margin: -2px -2px 4px; }
+#sidebar button { display: flex; align-items: center; gap: 11px; width: 100%; border: 0; background: var(--silver); box-shadow: var(--raised); cursor: pointer; padding: 11px 12px; font: bold 15px var(--sans); color: #000; text-align: left; }
+#sidebar button:hover { background: #d4d0c8; }
+#sidebar button:active, #sidebar button.on { box-shadow: var(--pressed); }
+#sidebar .ico { font-size: 20px; line-height: 1; width: 22px; text-align: center; }
+
+#side-toggle { position: fixed; top: 9px; left: 10px; z-index: 460; display: none; width: 40px; height: 40px;
+  border: 0; background: var(--silver); box-shadow: var(--raised); cursor: pointer; font-size: 20px; line-height: 1; }
+#side-toggle:active { box-shadow: var(--pressed); }
+
+@media (min-width: 760px) {
+  #sidebar { display: flex; }
+  #stage { left: var(--sidebar-w); right: auto; width: calc(100% - var(--sidebar-w)); }
+}
+@media (max-width: 759px) {
+  #side-toggle { display: grid; place-items: center; }
+  body.sidebar-open #sidebar { display: flex; box-shadow: 4px 0 18px rgba(0,0,0,.5), var(--raised); }
+}
+
 /* news ticker — fixed at the bottom, over the canvas */
 #newsbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 500; height: 30px; display: flex; align-items: stretch;
   background: #000; border-top: 2px solid var(--yellow, #FFFF00); font-family: var(--sans); pointer-events: none; }

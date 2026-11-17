@@ -939,28 +939,7 @@ function startHub(logoImage, doorImage) {
     home.position.set(left + (46 + bw) / 2, 0, 0);
     hud.add(home);
     interactive(home, 'hud', () => scrollTo(anchors.top));
-
-    let x = cw / 2;
-    const addLink = (label, w, onClick, opts) => {
-      const mesh = button(label, w, 32, opts);
-      mesh.renderOrder = 102;
-      mesh.position.set(x - w / 2, 0, 0);
-      x -= w + 6;
-      hud.add(mesh);
-      interactive(mesh, 'hud', onClick, (on) => mesh.userData.setHover(on));
-    };
-    if (backend.me) {
-      const name = backend.me.username;
-      addLink(name.length > 11 ? name.slice(0, 10) + '…' : name, full ? 104 : 78, () => dialogs.openAccount());
-    } else {
-      addLink('Join', 64, () => openAccountOrAuth());
-    }
-    addLink('Request', 96, () => window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'));
-    if (W >= 480) addLink('Scores', 78, () => scrollTo(anchors.board));
-    addLink('Games', 70, () => scrollTo(anchors.games));
-    // Music switch: stays pressed in while the song is on.
-    if (full) addLink(musicOn ? '♪ Music: On' : '♪ Music: Off', 112, toggleMusic, { down: musicOn });
-    else addLink('♪', 34, toggleMusic, { down: musicOn, size: 17 });
+    // The page links and music switch now live in the left sidebar.
   }
 
   function buildHero(y, cw, wide) {
@@ -1949,7 +1928,7 @@ function startHub(logoImage, doorImage) {
     window.__openGame = (g) => openGame(g);
   }
   requestAnimationFrame(tick);
-  return { rebuild: build };
+  return { rebuild: build, scrollToSection: (name) => scrollTo(anchors[name] || 0) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1990,6 +1969,32 @@ function syncNewsEdit() {
   if (btn) btn.hidden = !backend.isStaff();
 }
 
+/* ---------- left sidebar (pages) ---------- */
+
+function syncSidebarAccount() {
+  const a = $('side-account');
+  if (!a) return;
+  const signedIn = Boolean(backend.me);
+  a.title = signedIn ? 'My account' : 'Join';
+  a.querySelector('.label').textContent = signedIn ? 'Account' : 'Join';
+}
+
+function setupSidebar() {
+  const bar = $('sidebar');
+  if (!bar) return;
+  const closeDrawer = () => document.body.classList.remove('sidebar-open');   // only matters on narrow screens
+  bar.querySelectorAll('[data-go]').forEach((btn) => btn.addEventListener('click', () => { if (hub) hub.scrollToSection(btn.dataset.go); closeDrawer(); }));
+  bar.querySelector('[data-act="request"]').addEventListener('click', () => { window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'); closeDrawer(); });
+  bar.querySelector('[data-act="account"]').addEventListener('click', () => { openAccountOrAuth(); closeDrawer(); });
+  const musicBtn = bar.querySelector('[data-act="music"]');
+  const syncMusicBtn = () => { musicBtn.classList.toggle('on', musicOn); musicBtn.title = musicOn ? 'Music: On' : 'Music: Off'; };
+  musicBtn.addEventListener('click', () => { toggleMusic(); syncMusicBtn(); });
+  syncMusicBtn();
+  syncSidebarAccount();
+  const toggle = $('side-toggle');
+  if (toggle) toggle.addEventListener('click', () => document.body.classList.toggle('sidebar-open'));
+}
+
 async function boot() {
   renderQuickList();
   renderNews(null);     // show the default straight away; the saved text loads below
@@ -1998,6 +2003,7 @@ async function boot() {
     await backend.setNews(text);
     renderNews(text);
   }));
+  setupSidebar();
   loader.show('Loading the HUB', 'assets/loading-invasion.jpg');
   const started = performance.now();
   try {
@@ -2012,7 +2018,7 @@ async function boot() {
   }
   // Accounts load in the background so a sleeping server never blocks the page.
   dialogs.setHooks({ toast, gamesChanged: refreshGames });
-  backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); if (hub) hub.rebuild(); });
+  backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); });
   backend.start().then(() => Promise.all([refreshGames(), refreshBoard(), backend.getNews().then(renderNews)])).then(() => {
     syncNewsEdit();
     const linked = gameFromHash();           // a share link to a HUB-added game
