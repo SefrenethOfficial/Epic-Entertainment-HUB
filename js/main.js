@@ -68,6 +68,7 @@ const loader = {
     this.progress = 0;
     $('loader-fill').style.width = '0%';
     $('loader').classList.remove('hidden');
+    document.body.classList.add('loading');
     clearInterval(loaderTimer);
     // Creep towards 90% while we wait; finish() fills the rest.
     loaderTimer = setInterval(() => {
@@ -80,10 +81,12 @@ const loader = {
     $('loader-fill').style.width = '100%';
     await wait(300);
     $('loader').classList.add('hidden');
+    document.body.classList.remove('loading');
   },
   hideNow() {
     clearInterval(loaderTimer);
     $('loader').classList.add('hidden');
+    document.body.classList.remove('loading');
   },
 };
 
@@ -391,6 +394,7 @@ async function openGame(game) {
   $('player-comments').hidden = !backend.configured;
   frame.title = game.title;
   $('player').hidden = false;
+  document.body.classList.add('game-open');
   history.replaceState(null, '', '#play=' + game.id);
   document.title = game.title + ' — Epic Entertainment HUB';
 
@@ -441,6 +445,7 @@ function closeGame() {
   frame.src = 'about:blank';
   if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
   $('player').hidden = true;
+  document.body.classList.remove('game-open');
   loader.hideNow();
   history.replaceState(null, '', location.pathname + location.search);
   document.title = 'Epic Entertainment HUB';
@@ -1643,9 +1648,14 @@ function startHub(logoImage, doorImage) {
 
     const cw = Math.min(W - 36, 1120);
     const wide = W >= 860;
+    // When the left sidebar is showing, the canvas starts to the right of it
+    // (rect.left > 0). Hug the content against the sidebar instead of leaving a
+    // gap beside it — any slack goes on the right, not the left.
+    const offsetX = rect.left > 1 ? -Math.round((W - cw) / 2) : 0;
+    page.position.x = offsetX;
 
     buildNav(cw, wide);
-    hud.position.set(0, H / 2 - NAV_H / 2, 0);
+    hud.position.set(offsetX, H / 2 - NAV_H / 2, 0);
 
     let y = NAV_H;
     y = buildHero(y, cw, wide);
