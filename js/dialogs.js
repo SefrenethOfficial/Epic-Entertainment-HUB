@@ -273,7 +273,7 @@ function showForm(item) {
     field('Hero image (wide)', backdropFile, 'Shown big behind the hero'),
     field('…or hero image address', backdropUrl),
     field('Description', description),
-    field('Watch link', watchUrl, 'Where “Watch” goes — you set this manually'),
+    field('Watch link', watchUrl, 'YouTube or Google Drive. A Drive file must be shared “Anyone with the link”.'),
     featLabel,
     sort ? field('Shelf order', sort, 'Lower numbers first') : null,
   ];

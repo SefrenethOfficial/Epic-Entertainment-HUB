@@ -1008,10 +1008,21 @@ function openWatch(s) {
   const w = $('th-watch'), frame = $('th-watch-frame'), title = $('th-watch-title');
   if (!w || !s.watchUrl) { if (s && !s.watchUrl) toast('No video link set for this title yet.'); return; }
   if (title) title.textContent = s.title;
+  // Always offer an "open in new tab" escape hatch (and a Drive-sharing hint).
+  const open = $('th-watch-open'), hint = $('th-watch-hint');
+  if (open) { open.href = s.watchUrl; open.hidden = false; }
+  if (hint) { hint.hidden = !isDriveUrl(s.watchUrl); hint.textContent = 'Drive file must be shared “Anyone with the link”'; }
   frame.src = watchEmbedUrl(s.watchUrl);
   w.hidden = false;
 }
-function closeWatch() { const w = $('th-watch'), frame = $('th-watch-frame'); if (w) w.hidden = true; if (frame) frame.src = 'about:blank'; }
+function closeWatch() {
+  const w = $('th-watch'), frame = $('th-watch-frame');
+  if (w) w.hidden = true;
+  if (frame) frame.src = 'about:blank';
+  const open = $('th-watch-open'), hint = $('th-watch-hint');
+  if (open) open.hidden = true;
+  if (hint) hint.hidden = true;
+}
 
 // Make common share links embeddable (YouTube, Google Drive); otherwise use as-is.
 function watchEmbedUrl(url) {
@@ -1020,10 +1031,16 @@ function watchEmbedUrl(url) {
     const host = u.hostname.replace(/^www\./, '');
     if (host === 'youtu.be') return 'https://www.youtube.com/embed/' + u.pathname.slice(1);
     if (host.endsWith('youtube.com')) { const v = u.searchParams.get('v'); if (v) return 'https://www.youtube.com/embed/' + v; }
-    if (host === 'drive.google.com') { const m = u.pathname.match(/\/file\/d\/([^/]+)/); if (m) return 'https://drive.google.com/file/d/' + m[1] + '/preview'; }
+    if (host.endsWith('drive.google.com')) {
+      // works for /file/d/<id>/..., /d/<id>, open?id=<id>, uc?id=<id>
+      const m = u.pathname.match(/\/d\/([^/]+)/);
+      const id = (m && m[1]) || u.searchParams.get('id');
+      if (id) return 'https://drive.google.com/file/d/' + id + '/preview';
+    }
   } catch (e) { /* not a URL we rewrite */ }
   return url;
 }
+const isDriveUrl = (url) => { try { return new URL(url, location.href).hostname.endsWith('drive.google.com'); } catch (e) { return false; } };
 
 async function deleteShowFlow(s) {
   const yes = await dialogs.confirmWindow('Remove "' + s.title + '" from the theater?', 'Delete');
