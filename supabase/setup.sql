@@ -532,6 +532,7 @@ grant select on public.pfp_items to anon, authenticated;
 create or replace function public.hub_buy_pfp(p_face text)
 returns table(diamonds int, pfp text, owned_pfps text[])
 language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
 declare v_price int; v_owned text[]; v_dia int;
 begin
   select price into v_price from public.pfp_items where id = p_face;
@@ -550,6 +551,7 @@ end $$;
 
 create or replace function public.hub_equip_pfp(p_face text)
 returns table(pfp text) language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
 begin
   if not exists (select 1 from public.profiles where id = auth.uid() and p_face = any(owned_pfps))
     then raise exception 'You don''t own that face'; end if;
