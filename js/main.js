@@ -131,9 +131,11 @@ shopSong.loop = true;
 shopSong.volume = 0.55;
 shopSong.preload = 'auto';
 let shopActive = false;
+let theaterActive = false;   // the Shows tab runs its own quiet, so hush the hub beat
 
 function syncMusic() {
   if (secretActive) { music.pause(); shopSong.pause(); return; }   // the secret has taken the stage
+  if (theaterActive) { music.pause(); shopSong.pause(); return; }  // the theater keeps its own silence
   if (shopActive) {   // the shop's Friday Theme plays instead of the hub beat
     music.pause();
     if (musicOn && !document.hidden) shopSong.play().catch(() => {}); else shopSong.pause();
@@ -142,6 +144,29 @@ function syncMusic() {
   shopSong.pause();
   if (musicOn && !playing && !document.hidden) music.play().catch(() => {});
   else music.pause();
+}
+
+// A tiny synthesized "ta-dum" sting for the parody studio intro (no audio file).
+function playTaDum() {
+  if (!musicOn) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ac = new Ctx();
+    const now = ac.currentTime;
+    const note = (freq, t0, dur, peak) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sawtooth'; o.frequency.value = freq;
+      o.connect(g); g.connect(ac.destination);
+      g.gain.setValueAtTime(0.0001, now + t0);
+      g.gain.exponentialRampToValueAtTime(peak, now + t0 + 0.04);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + t0 + dur);
+      o.start(now + t0); o.stop(now + t0 + dur + 0.05);
+    };
+    note(146.83, 0, 0.35, 0.3);     // D3 — "ta"
+    note(196.00, 0.34, 1.1, 0.34);  // G3 — "dummm"
+    note(392.00, 0.34, 1.1, 0.12);  // G4 shimmer on top
+    setTimeout(() => ac.close().catch(() => {}), 1800);
+  } catch (e) { /* no audio, no problem */ }
 }
 
 function toggleMusic() {
@@ -816,6 +841,214 @@ function afterPfpChange() {
   const bd = $('shop');
   if (bd) bd.addEventListener('click', (e) => { if (e.target === bd) closeShop(); });
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && shopOpen && $('pack-open') && $('pack-open').hidden) closeShop(); });
+})();
+
+/* ------------------------------ the Shows tab ----------------------------- */
+// Walk in and the Windows-95 world gives way to a little cinema: a parody
+// "EPIC PICTURES" intro, a featured hero, and Netflix-style rows of cards.
+let theaterOpen = false;
+let shows = null;              // loaded lazily
+let heroIdx = 0, heroTimer = 0;
+
+async function openTheater() {
+  if (!$('theater')) return;
+  theaterOpen = true; theaterActive = true;
+  $('theater').hidden = false;
+  document.body.classList.add('theater-open');
+  syncMusic();                 // hush the hub
+  playIntro();                 // parody opening, plays once per entry
+  try { shows = await backend.listShows(); } catch (e) { shows = shows || []; }
+  renderTheater();
+}
+function closeTheater() {
+  theaterOpen = false; theaterActive = false;
+  stopHeroRotate();
+  closeWatch();
+  if ($('th-modal')) { $('th-modal').hidden = true; $('th-modal').replaceChildren(); }
+  if ($('theater')) $('theater').hidden = true;
+  document.body.classList.remove('theater-open');
+  syncMusic();                 // bring the hub beat back
+}
+
+function playIntro() {
+  const intro = $('th-intro');
+  if (!intro) return;
+  intro.classList.remove('gone');
+  intro.replaceChildren(
+    mk('div', { class: 'th-spot l' }), mk('div', { class: 'th-spot r' }),
+    mk('div', { class: 'th-curtain l' }), mk('div', { class: 'th-curtain r' }),
+    mk('div', { class: 'th-logo' },
+      mk('div', { class: 'mark' }, 'EPIC PICTURES'),
+      mk('div', { class: 'sub' }, 'A SEFRENETH PRODUCTION')),
+    mk('div', { class: 'th-shine' }),
+    mk('button', { class: 'th-skip', type: 'button', onclick: endIntro }, 'Skip ▸'),
+  );
+  playTaDum();
+  clearTimeout(intro._t);
+  intro._t = setTimeout(endIntro, 2800);
+}
+function endIntro() {
+  const intro = $('th-intro');
+  if (!intro || intro.classList.contains('gone')) return;
+  clearTimeout(intro._t);
+  intro.classList.add('gone');
+  setTimeout(() => { if (intro.classList.contains('gone')) intro.replaceChildren(); }, 600);
+}
+
+function stars(n) {
+  const full = Math.round(n * 2) / 2;   // nearest half
+  let s = '';
+  for (let i = 1; i <= 5; i++) s += i <= full ? '★' : (i - 0.5 === full ? '⯪' : '☆');
+  return s;
+}
+
+function renderTheater() {
+  renderHero();
+  renderRows();
+}
+
+function renderHero() {
+  const host = $('th-hero');
+  if (!host) return;
+  const feats = (shows || []).filter((s) => s.featured);
+  stopHeroRotate();
+  if (!feats.length) {
+    host.style.backgroundImage = '';
+    host.replaceChildren(mk('div', { class: 'th-hero-empty' },
+      backend.isStaff() ? 'No featured title yet — add one below and tick “Feature in the hero”.' : 'Now showing: nothing yet. Check back soon!'));
+    return;
+  }
+  if (heroIdx >= feats.length) heroIdx = 0;
+  const s = feats[heroIdx];
+  host.style.backgroundImage = s.backdrop ? `url("${cssUrl(s.backdrop)}")` : (s.banner ? `url("${cssUrl(s.banner)}")` : '');
+  host.replaceChildren(
+    mk('div', { class: 'th-hero-inner' },
+      mk('div', { class: 'th-hero-kicker' }, s.kind === 'movie' ? 'FEATURED FILM' : 'FEATURED SERIES'),
+      s.banner ? mk('img', { class: 'th-hero-banner', src: s.banner, alt: s.title })
+        : mk('h2', { class: 'th-hero-title' }, s.title),
+      mk('div', { class: 'th-meta' },
+        mk('span', { class: 'th-kindtag' }, s.kind === 'movie' ? 'MOVIE' : 'SERIES'),
+        s.rating ? mk('span', { class: 'th-badge' }, s.rating) : null,
+        s.stars ? mk('span', { class: 'th-stars' }, stars(s.stars), mk('small', {}, s.stars.toFixed(1))) : null),
+      s.description ? mk('p', { class: 'th-hero-desc' }, s.description) : null,
+      mk('div', { class: 'th-hero-btns' },
+        mk('button', { class: 'th-btn play', type: 'button', onclick: () => (s.watchUrl ? openWatch(s) : openShowDetails(s)) }, '▶  Watch'),
+        mk('button', { class: 'th-btn more', type: 'button', onclick: () => openShowDetails(s) }, 'More info'))),
+    feats.length > 1 ? mk('div', { class: 'th-dots' }, ...feats.map((_, i) =>
+      mk('button', { class: 'th-dot' + (i === heroIdx ? ' on' : ''), type: 'button', onclick: () => { heroIdx = i; renderHero(); } }))) : null,
+  );
+  if (feats.length > 1) heroTimer = setInterval(() => { heroIdx = (heroIdx + 1) % feats.length; renderHero(); }, 6000);
+}
+function stopHeroRotate() { if (heroTimer) { clearInterval(heroTimer); heroTimer = 0; } }
+const cssUrl = (u) => String(u).replace(/"/g, '%22');
+
+function renderRows() {
+  const host = $('th-rows');
+  if (!host) return;
+  const list = shows || [];
+  const blocks = [];
+  if (backend.isStaff()) {
+    blocks.push(mk('div', { class: 'th-manage' },
+      mk('span', {}, '🎬 Editor tools — add shows & movies, set posters, ratings and the hero'),
+      mk('button', { class: 'th-add', type: 'button', onclick: () => dialogs.openAddShow() }, '+ Add a title')));
+  }
+  const rowFor = (title, items) => items.length
+    ? mk('div', { class: 'th-row' }, mk('h3', {}, title), mk('div', { class: 'th-rowscroll' }, ...items.map(cardFor)))
+    : null;
+  const feats = list.filter((s) => s.featured);
+  blocks.push(rowFor('Featured', feats));
+  blocks.push(rowFor('Series', list.filter((s) => s.kind === 'show')));
+  blocks.push(rowFor('Movies', list.filter((s) => s.kind === 'movie')));
+  if (!list.length) blocks.push(mk('div', { class: 'th-empty' }, backend.isStaff() ? 'Nothing showing yet — add your first title above.' : 'The marquee is empty for now. Check back soon!'));
+  host.replaceChildren(...blocks.filter(Boolean));
+}
+
+function cardFor(s) {
+  const poster = mk('div', { class: 'th-poster' });
+  if (s.banner) poster.style.backgroundImage = `url("${cssUrl(s.banner)}")`;
+  else poster.appendChild(mk('span', {}, s.title));
+  return mk('div', { class: 'th-card', role: 'button', tabindex: '0', title: s.title,
+    onclick: () => openShowDetails(s),
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openShowDetails(s); } } },
+    s.featured ? mk('div', { class: 'th-hero-badge' }, '★ HERO') : null,
+    poster,
+    mk('div', { class: 'th-card-info' },
+      mk('div', { class: 'th-card-title' }, s.title),
+      mk('div', { class: 'th-card-sub' },
+        s.stars ? mk('span', { class: 's' }, '★ ' + s.stars.toFixed(1)) : null,
+        s.rating ? mk('span', { class: 'r' }, s.rating) : null)),
+    backend.isStaff() ? mk('div', { class: 'th-card-staff' },
+      mk('button', { type: 'button', title: 'Edit', onclick: (e) => { e.stopPropagation(); dialogs.openEditShow(s); } }, '✎'),
+      mk('button', { type: 'button', title: 'Delete', onclick: (e) => { e.stopPropagation(); deleteShowFlow(s); } }, '🗑')) : null);
+}
+
+function openShowDetails(s) {
+  const m = $('th-modal');
+  if (!m) return;
+  const top = mk('div', { class: 'th-sheet-top' },
+    mk('button', { class: 'th-sheet-x', type: 'button', onclick: closeShowDetails }, '✕'),
+    s.banner && !s.backdrop ? mk('img', { class: 'th-hero-banner', src: s.banner, alt: s.title })
+      : mk('h2', { class: 'th-sheet-title' }, s.title));
+  if (s.backdrop) top.style.backgroundImage = `url("${cssUrl(s.backdrop)}")`;
+  m.replaceChildren(mk('div', { class: 'th-sheet' }, top,
+    mk('div', { class: 'th-sheet-body' },
+      mk('div', { class: 'th-meta', style: 'margin-top:14px' },
+        mk('span', { class: 'th-kindtag' }, s.kind === 'movie' ? 'MOVIE' : 'SERIES'),
+        s.rating ? mk('span', { class: 'th-badge' }, s.rating) : null,
+        s.stars ? mk('span', { class: 'th-stars' }, stars(s.stars), mk('small', {}, s.stars.toFixed(1))) : null),
+      s.description ? mk('p', { class: 'th-sheet-desc' }, s.description) : mk('p', { class: 'th-sheet-desc' }, 'No description yet.'),
+      mk('div', { class: 'th-hero-btns' },
+        s.watchUrl ? mk('button', { class: 'th-btn play', type: 'button', onclick: () => openWatch(s) }, '▶  Watch') : null,
+        backend.isStaff() ? mk('button', { class: 'th-btn more', type: 'button', onclick: () => { closeShowDetails(); dialogs.openEditShow(s); } }, 'Edit') : null))));
+  m.hidden = false;
+}
+function closeShowDetails() { const m = $('th-modal'); if (m) { m.hidden = true; m.replaceChildren(); } }
+
+function openWatch(s) {
+  const w = $('th-watch'), frame = $('th-watch-frame'), title = $('th-watch-title');
+  if (!w || !s.watchUrl) { if (s && !s.watchUrl) toast('No video link set for this title yet.'); return; }
+  if (title) title.textContent = s.title;
+  frame.src = watchEmbedUrl(s.watchUrl);
+  w.hidden = false;
+}
+function closeWatch() { const w = $('th-watch'), frame = $('th-watch-frame'); if (w) w.hidden = true; if (frame) frame.src = 'about:blank'; }
+
+// Make common share links embeddable (YouTube, Google Drive); otherwise use as-is.
+function watchEmbedUrl(url) {
+  try {
+    const u = new URL(url, location.href);
+    const host = u.hostname.replace(/^www\./, '');
+    if (host === 'youtu.be') return 'https://www.youtube.com/embed/' + u.pathname.slice(1);
+    if (host.endsWith('youtube.com')) { const v = u.searchParams.get('v'); if (v) return 'https://www.youtube.com/embed/' + v; }
+    if (host === 'drive.google.com') { const m = u.pathname.match(/\/file\/d\/([^/]+)/); if (m) return 'https://drive.google.com/file/d/' + m[1] + '/preview'; }
+  } catch (e) { /* not a URL we rewrite */ }
+  return url;
+}
+
+async function deleteShowFlow(s) {
+  const yes = await dialogs.confirmWindow('Remove "' + s.title + '" from the theater?', 'Delete');
+  if (!yes) return;
+  try { await backend.deleteShow(s.id); await showsChanged(); toast('Removed ' + s.title + '.'); }
+  catch (e) { toast(e.message || 'Could not delete that.'); }
+}
+
+// Reload the catalogue after a staff change and re-render.
+async function showsChanged() {
+  try { shows = await backend.listShows(); } catch (e) { /* keep what we have */ }
+  if (theaterOpen) renderTheater();
+}
+
+// Wire the theater's static controls once.
+(() => {
+  const close = $('th-close'); if (close) close.addEventListener('click', closeTheater);
+  const wb = $('th-watch-back'); if (wb) wb.addEventListener('click', closeWatch);
+  const m = $('th-modal'); if (m) m.addEventListener('click', (e) => { if (e.target === m) closeShowDetails(); });
+  addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !theaterOpen) return;
+    if ($('th-watch') && !$('th-watch').hidden) closeWatch();
+    else if ($('th-modal') && !$('th-modal').hidden) closeShowDetails();
+    else closeTheater();
+  });
 })();
 
 // Reload the list of HUB-added games, apply play counts, sort most-played first.
@@ -2270,6 +2503,8 @@ function setupSidebar() {
   }));
   const shopBtn = bar.querySelector('[data-act="shop"]');
   if (shopBtn) shopBtn.addEventListener('click', () => { openShop(); closeDrawer(); });
+  const showsBtn = bar.querySelector('[data-act="shows"]');
+  if (showsBtn) showsBtn.addEventListener('click', () => { openTheater(); closeDrawer(); });
   bar.querySelector('[data-act="request"]').addEventListener('click', () => { window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'); closeDrawer(); });
   bar.querySelector('[data-act="account"]').addEventListener('click', () => { openAccountOrAuth(); closeDrawer(); });
   const musicBtn = bar.querySelector('[data-act="music"]');
@@ -2303,7 +2538,7 @@ async function boot() {
     document.body.classList.add('no-webgl');
   }
   // Accounts load in the background so a sleeping server never blocks the page.
-  dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed, facesChanged, deleteFace: deleteFaceFlow });
+  dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed, facesChanged, deleteFace: deleteFaceFlow, showsChanged, deleteShow: deleteShowFlow });
   backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); if (lbOpen) renderBoardPage(); if (shopOpen) renderShop(); });
   backend.loadFaces().then(() => { if (hub) hub.rebuild(); syncSidebarAccount(); });   // resolve uploaded-face avatars
   backend.start().then(() => Promise.all([refreshGames(), refreshBoard(), backend.getNews().then(renderNews)])).then(() => {
@@ -2327,6 +2562,9 @@ async function boot() {
       openShop, closeShop,
       shopItems: () => shopCatalog,
       shopAudio: () => ({ shopActive, shopPlaying: !shopSong.paused, musicPaused: music.paused }),
+      openTheater, closeTheater, endIntro,
+      shows: () => shows,
+      theaterState: () => ({ theaterActive, musicPaused: music.paused }),
     };
   }
 

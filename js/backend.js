@@ -310,6 +310,93 @@ export async function equipPfp(face) {
   return me;
 }
 
+/* ------------------------------ shows (theater) ----------------------------- */
+
+function toShow(row) {
+  return {
+    id: row.id,
+    title: row.title || 'Untitled',
+    kind: row.kind === 'movie' ? 'movie' : 'show',
+    rating: row.content_rating || '',
+    stars: Math.max(0, Math.min(5, Number(row.stars) || 0)),
+    banner: row.banner_url || null,
+    backdrop: row.backdrop_url || null,
+    description: row.description || '',
+    watchUrl: row.watch_url || null,
+    featured: Boolean(row.featured),
+    sort: Number(row.sort) || 0,
+  };
+}
+
+export async function listShows() {
+  if (!db) return [];
+  const { data, error } = await db.from('shows').select('*').order('sort').order('created_at').limit(500);
+  if (error) throw fail(error);
+  return data.map(toShow);
+}
+
+// Resolve an image field: an uploaded file wins, else a pasted address, else keep.
+async function resolveImage(file, url) {
+  if (file) return publicUrl('game-images', await upload('game-images', file, randomName(IMG_EXT[file.type] || '.png'), file.type));
+  if ((url || '').trim()) return url.trim();
+  return undefined;
+}
+
+function showPatch({ title, kind, rating, stars, description, watchUrl, featured, sort }, isNew) {
+  const p = {};
+  if (title != null && title.trim()) p.title = title.trim();
+  if (kind && (kind === 'show' || kind === 'movie')) p.kind = kind;
+  if (rating !== undefined) p.content_rating = (rating || '').trim() || null;
+  if (stars !== undefined && stars !== '') p.stars = Math.max(0, Math.min(5, Number(stars) || 0));
+  if (description !== undefined) p.description = (description || '').trim() || null;
+  if (watchUrl !== undefined) p.watch_url = (watchUrl || '').trim() || null;
+  if (featured !== undefined) p.featured = Boolean(featured);
+  if (sort !== undefined && sort !== '') p.sort = Math.round(Number(sort) || 0);
+  if (isNew && p.title == null) throw new Error('Give it a title.');
+  return p;
+}
+
+export async function addShow(fields) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage shows.');
+  const row = showPatch(fields, true);
+  const banner = await resolveImage(fields.bannerFile, fields.bannerUrl);
+  const backdrop = await resolveImage(fields.backdropFile, fields.backdropUrl);
+  if (banner !== undefined) row.banner_url = banner;
+  if (backdrop !== undefined) row.backdrop_url = backdrop;
+  const { data, error } = await db.from('shows').insert(row).select('*');
+  if (error) throw fail(error);
+  return toShow(Array.isArray(data) ? data[0] : data);
+}
+
+export async function editShow(id, fields) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage shows.');
+  const patch = showPatch(fields, false);
+  const banner = await resolveImage(fields.bannerFile, fields.bannerUrl);
+  const backdrop = await resolveImage(fields.backdropFile, fields.backdropUrl);
+  if (banner !== undefined) patch.banner_url = banner;
+  if (backdrop !== undefined) patch.backdrop_url = backdrop;
+  if (!Object.keys(patch).length) return;
+  const { error } = await db.from('shows').update(patch).eq('id', id);
+  if (error) throw fail(error);
+}
+
+// A quick toggle used by the "make this the hero" control.
+export async function setShowFeatured(id, featured) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage shows.');
+  const { error } = await db.from('shows').update({ featured: Boolean(featured) }).eq('id', id);
+  if (error) throw fail(error);
+}
+
+export async function deleteShow(id) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage shows.');
+  const { error } = await db.from('shows').delete().eq('id', id);
+  if (error) throw fail(error);
+}
+
 /* -------------------------------- games ------------------------------- */
 
 const publicUrl = (bucket, path) => db.storage.from(bucket).getPublicUrl(path).data.publicUrl;

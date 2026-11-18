@@ -237,6 +237,90 @@ export function openEditFace(item) {
   f.name.focus();
 }
 
+/* ---------------------------- shows (the theater) --------------------------- */
+
+const KIND_OPTS = [['show', 'Series / Show'], ['movie', 'Movie']];
+
+function showForm(item) {
+  const title = el('input', { type: 'text', maxLength: 80, spellcheck: false, value: item ? item.title : '', placeholder: 'e.g. Epic Quest' });
+  const kind = el('select', {}, ...KIND_OPTS.map(([v, l]) => el('option', { value: v }, l)));
+  kind.value = item ? item.kind : 'show';
+  const rating = el('input', { type: 'text', maxLength: 10, spellcheck: false, value: item ? item.rating : '', placeholder: 'e.g. PG, TV-MA, 18+' });
+  const starsIn = el('input', { type: 'number', min: '0', max: '5', step: '0.5', value: item ? String(item.stars) : '0' });
+  const bannerFile = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif' });
+  const bannerUrl = el('input', { type: 'url', spellcheck: false, placeholder: 'https://… poster/banner' });
+  const backdropFile = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif' });
+  const backdropUrl = el('input', { type: 'url', spellcheck: false, placeholder: 'https://… wide hero image' });
+  const description = el('textarea', { rows: 3, maxLength: 600, placeholder: 'What’s it about?' });
+  if (item) description.value = item.description || '';
+  const watchUrl = el('input', { type: 'url', spellcheck: false, value: item ? (item.watchUrl || '') : '', placeholder: 'https://… (YouTube, Drive, etc.)' });
+  const featured = el('input', { type: 'checkbox' });
+  if (item && item.featured) featured.checked = true;
+  const featLabel = el('label', { className: 'win-check' }, featured, el('span', {}, 'Feature in the hero'));
+  const sort = item ? el('input', { type: 'number', step: '1', value: String(item.sort || 0) }) : null;
+  const get = () => ({ title: title.value, kind: kind.value, rating: rating.value, stars: starsIn.value,
+    description: description.value, watchUrl: watchUrl.value, featured: featured.checked,
+    sort: sort ? sort.value : undefined,
+    bannerFile: bannerFile.files[0] || null, bannerUrl: bannerUrl.value,
+    backdropFile: backdropFile.files[0] || null, backdropUrl: backdropUrl.value });
+  const fields = [
+    field('Title', title),
+    field('Type', kind),
+    field('Content rating', rating),
+    field('Star rating (0–5)', starsIn),
+    field('Name banner / poster', bannerFile, item ? 'Leave empty to keep the current image' : null),
+    field('…or banner address', bannerUrl),
+    field('Hero image (wide)', backdropFile, 'Shown big behind the hero'),
+    field('…or hero image address', backdropUrl),
+    field('Description', description),
+    field('Watch link', watchUrl, 'Where “Watch” goes — you set this manually'),
+    featLabel,
+    sort ? field('Shelf order', sort, 'Lower numbers first') : null,
+  ];
+  return { get, fields, focus: title };
+}
+
+export function openAddShow() {
+  if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can manage shows.');
+  const f = showForm(null);
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Adding…', async () => {
+      await backend.addShow(f.get());
+      dlg.close();
+      hooks.toast('Added to the theater!');
+      if (hooks.showsChanged) hooks.showsChanged();
+    });
+  } }, ...f.fields, status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Add title'),
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel')));
+  const dlg = openWindow('Add a title', form, 380);
+  f.focus.focus();
+}
+
+export function openEditShow(item) {
+  if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can manage shows.');
+  const f = showForm(item);
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Saving…', async () => {
+      await backend.editShow(item.id, f.get());
+      dlg.close();
+      hooks.toast('Saved ' + item.title + '.');
+      if (hooks.showsChanged) hooks.showsChanged();
+    });
+  } }, ...f.fields, status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Save'),
+      el('button', { type: 'button', className: 'win-btn danger', onclick: () => { if (hooks.deleteShow) hooks.deleteShow(item); dlg.close(); } }, 'Delete'),
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel')));
+  const dlg = openWindow('Edit title', form, 380);
+  f.focus.focus();
+}
+
 /* -------------------------------- members -------------------------------- */
 
 export function openMembers() {

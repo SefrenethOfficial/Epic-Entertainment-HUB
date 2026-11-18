@@ -86,6 +86,26 @@
   <div class="pack-open" id="pack-open" hidden></div>
 </div>
 
+<div id="theater" hidden>
+  <div class="th-intro" id="th-intro"></div>
+  <div class="th-chrome">
+    <div class="th-bar">
+      <span class="th-brand">🎬 EPIC&nbsp;PICTURES</span>
+      <span class="th-spacer"></span>
+      <button type="button" id="th-close" class="th-x">✕ Exit</button>
+    </div>
+    <div class="th-scroll" id="th-scroll">
+      <div class="th-hero" id="th-hero"></div>
+      <div class="th-rows" id="th-rows"></div>
+    </div>
+  </div>
+  <div class="th-modal" id="th-modal" hidden></div>
+  <div class="th-watch" id="th-watch" hidden>
+    <div class="th-watch-bar"><button type="button" id="th-watch-back">← Back</button><span id="th-watch-title"></span></div>
+    <div class="th-watch-frame"><iframe id="th-watch-frame" title="Watch" allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe></div>
+  </div>
+</div>
+
 <button type="button" id="side-toggle" aria-label="Pages menu">☰</button>
 <nav id="sidebar" aria-label="Pages">
   <div class="side-head">★ Pages</div>
@@ -93,6 +113,7 @@
   <button type="button" data-go="games"><span class="ico">🎮</span><span class="label">Games</span></button>
   <button type="button" data-go="board"><span class="ico">🏆</span><span class="label">Scores</span></button>
   <button type="button" data-act="shop"><span class="ico">🛒</span><span class="label">Shop</span></button>
+  <button type="button" data-act="shows"><span class="ico">🎬</span><span class="label">Shows</span></button>
   <button type="button" data-act="request"><span class="ico">📣</span><span class="label">Request</span></button>
   <button type="button" data-act="account" id="side-account"><span class="ico">👤</span><span class="label">Account</span></button>
   <button type="button" data-act="music" id="side-music"><span class="ico">🎵</span><span class="label">Music</span></button>

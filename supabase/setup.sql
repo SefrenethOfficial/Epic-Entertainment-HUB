@@ -595,3 +595,25 @@ begin
   update public.profiles set pfp = 'classic' where pfp = p_face;
 end $$;
 grant execute on function public.hub_delete_pfp(text) to authenticated;
+
+-- ------------------------------------------------- shows tab (the theater)
+-- Editor-curated shows and movies. Images are public URLs (uploaded to the
+-- game-images bucket or an address). "featured" rows show in the hero.
+create table if not exists public.shows (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  kind text not null default 'show' check (kind in ('show', 'movie')),
+  content_rating text,
+  stars numeric(2,1) not null default 0 check (stars >= 0 and stars <= 5),
+  banner_url text, backdrop_url text, description text, watch_url text,
+  featured boolean not null default false, sort int not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table public.shows enable row level security;
+drop policy if exists "shows public read" on public.shows;
+create policy "shows public read" on public.shows for select using (true);
+drop policy if exists "shows staff write" on public.shows;
+create policy "shows staff write" on public.shows for all to authenticated
+  using (public.my_rank() in ('owner', 'admin')) with check (public.my_rank() in ('owner', 'admin'));
+grant select on public.shows to anon, authenticated;
+grant insert, update, delete on public.shows to authenticated;
