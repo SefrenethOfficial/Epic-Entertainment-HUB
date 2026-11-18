@@ -53,6 +53,23 @@
   </div>
 </div>
 
+<div id="leaderboard" hidden>
+  <div class="lb-win" role="dialog" aria-label="Leaderboards">
+    <div class="lb-bar">
+      <span class="lb-title">🏆 Leaderboards.exe</span>
+      <button id="lb-close" type="button" class="lb-x" aria-label="Close">×</button>
+    </div>
+    <div class="lb-tabs" id="lb-tabs" role="tablist"></div>
+    <div class="lb-listwrap">
+      <table class="lb-table">
+        <thead><tr><th class="lb-rk">#</th><th class="lb-nm">Player</th><th class="lb-sc" id="lb-unit">Score</th></tr></thead>
+        <tbody id="lb-body"></tbody>
+      </table>
+    </div>
+    <div class="lb-foot" id="lb-foot"></div>
+  </div>
+</div>
+
 <button type="button" id="side-toggle" aria-label="Pages menu">☰</button>
 <nav id="sidebar" aria-label="Pages">
   <div class="side-head">★ Pages</div>

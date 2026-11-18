@@ -260,7 +260,13 @@ let blobUrl = null;
 let allGames = [...GAMES];
 
 // Leaderboard data, loaded lazily. null = not fetched yet.
-const board = { scope: 'week', week: null, all: null, epic: null };
+// The standalone page ranks by XP (all-time), Diamonds and Epic Points.
+const board = { scope: 'all', all: null, diamonds: null, epic: null };
+const BOARD_TABS = [
+  { scope: 'all', label: 'XP', unit: 'XP', blurb: 'Earned by playing games' },
+  { scope: 'diamonds', label: 'Diamonds', unit: '💎', blurb: 'Daily rewards & streaks' },
+  { scope: 'epic', label: 'Epic Points', unit: 'EP', blurb: 'Harvested in the Epic Clicker' },
+];
 
 /* ---- active play time: fuels XP (1/min) and diamonds (1/10min) ---- */
 // Time only counts while a game is open, the tab is visible, and the window
@@ -287,17 +293,20 @@ function stopActiveTracking() {
 }
 addEventListener('pagehide', flushActiveTime);
 
-// Reload both leaderboards and redraw.
+// Reload every leaderboard (XP, diamonds, Epic Points) and redraw.
 async function refreshBoard() {
   if (!backend.configured) return;
   try {
-    const [week, all, epic] = await Promise.all([backend.leaderboard('week'), backend.leaderboard('all'), backend.leaderboard('epic')]);
-    board.week = week; board.all = all; board.epic = epic;
+    const [all, diamonds, epic] = await Promise.all([
+      backend.leaderboard('all'), backend.leaderboard('diamonds'), backend.leaderboard('epic'),
+    ]);
+    board.all = all; board.diamonds = diamonds; board.epic = epic;
   } catch (err) {
     console.error('Could not load the leaderboard', err);
-    board.week = board.week || []; board.all = board.all || []; board.epic = board.epic || [];
+    board.all = board.all || []; board.diamonds = board.diamonds || []; board.epic = board.epic || [];
   }
   if (hub) hub.rebuild();
+  if (lbOpen) renderBoardPage();   // keep the open page in sync
 }
 
 async function claimDailyFlow() {
@@ -496,6 +505,110 @@ function openAccountOrAuth() {
   else if (backend.configured) dialogs.openAuth();
   else toast('Accounts are coming soon!');
 }
+
+/* ------------------------- the leaderboard page ------------------------- */
+// Its own full-screen Windows 95 window: a tab per point type (XP, Diamonds,
+// Epic Points), the whole roster for that tab, and a footer to change your
+// name or claim the daily reward.
+let lbOpen = false;
+
+function mk(tag, props, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else if (k === 'class') n.className = v;
+    else if (k in n) n[k] = v; else n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return n;
+}
+
+function openLeaderboard() {
+  if (!$('leaderboard')) return;
+  lbOpen = true;
+  $('leaderboard').hidden = false;
+  renderBoardPage();
+  if (backend.configured && board[board.scope] == null) refreshBoard();   // lazy first load
+  const x = $('lb-close'); if (x) x.focus();
+}
+function closeLeaderboard() {
+  lbOpen = false;
+  if ($('leaderboard')) $('leaderboard').hidden = true;
+}
+
+function renderBoardPage() {
+  const tabsEl = $('lb-tabs'), body = $('lb-body'), foot = $('lb-foot'), unitEl = $('lb-unit');
+  if (!tabsEl || !body) return;
+  const active = BOARD_TABS.find((t) => t.scope === board.scope) || BOARD_TABS[0];
+  const myName = backend.me ? backend.me.username : null;
+
+  // tabs
+  tabsEl.replaceChildren(...BOARD_TABS.map((t) => mk('button', {
+    class: 'lb-tab', type: 'button', role: 'tab', 'aria-selected': String(t.scope === board.scope),
+    title: t.blurb,
+    onclick: () => { if (board.scope !== t.scope) { board.scope = t.scope; renderBoardPage(); if (backend.configured && board[t.scope] == null) refreshBoard(); } },
+  }, t.label)));
+
+  if (unitEl) unitEl.textContent = active.unit === '💎' ? 'Diamonds' : active.label;
+
+  // the roster
+  const rows = board[board.scope];
+  if (!backend.configured) {
+    body.replaceChildren(mk('tr', {}, mk('td', { class: 'lb-note', colSpan: 3 }, 'Leaderboards light up once accounts are switched on.')));
+  } else if (rows == null) {
+    body.replaceChildren(mk('tr', {}, mk('td', { class: 'lb-note', colSpan: 3 }, 'Loading…')));
+  } else if (!rows.length) {
+    body.replaceChildren(mk('tr', {}, mk('td', { class: 'lb-note', colSpan: 3 }, 'No one here yet — be the first!')));
+  } else {
+    body.replaceChildren(...rows.map((p, i) => {
+      const mine = p.username === myName;
+      const medal = i < 3 ? ' lb-medal' + (i + 1) : '';
+      const badge = p.rank === 'owner' ? '♔' : p.rank === 'admin' ? '★' : '';
+      const nameTd = mk('td', { class: 'lb-nm r-' + p.rank },
+        p.username + (mine ? ' (you)' : ''),
+        badge ? mk('span', { class: 'lb-badge' }, badge) : null);
+      return mk('tr', { class: mine ? 'lb-me' : '' },
+        mk('td', { class: 'lb-rk' + medal }, '#' + (i + 1)),
+        nameTd,
+        mk('td', { class: 'lb-sc' }, (p.score || 0).toLocaleString() + ' ' + active.unit));
+    }));
+  }
+
+  // footer
+  if (!foot) return;
+  const bits = [];
+  if (backend.configured && backend.me) {
+    const me = backend.me;
+    const myScore = board.scope === 'epic' ? (me.epicPoints || 0) : board.scope === 'diamonds' ? (me.diamonds || 0) : (me.xp || 0);
+    const pos = (rows || []).findIndex((p) => p.username === me.username);
+    bits.push(mk('span', { class: 'lb-me-line' },
+      me.username + ' — ' + (pos >= 0 ? 'Rank #' + (pos + 1) : 'Unranked') + ' · ' + myScore.toLocaleString() + ' ' + active.unit));
+    bits.push(mk('button', { class: 'lb-btn', type: 'button', onclick: () => dialogs.openRename() }, 'Change name…'));
+    bits.push(mk('button', { class: 'lb-btn', type: 'button', onclick: () => dialogs.openMembers() }, 'Members…'));
+    if (backend.dailyAvailable()) bits.push(mk('button', { class: 'lb-btn', type: 'button', onclick: () => { claimDailyFlow(); } }, 'Claim daily 💎'));
+  } else if (backend.configured) {
+    bits.push(mk('button', { class: 'lb-btn', type: 'button', onclick: () => openAccountOrAuth() }, 'Pick a username to join!'));
+  }
+  bits.push(mk('button', { class: 'lb-btn primary', type: 'button', onclick: closeLeaderboard }, 'Close'));
+  foot.replaceChildren(...bits);
+}
+
+// After a rename: refresh the roster + the open page, nav label and account.
+function onRenamed() {
+  if (hub) hub.rebuild();
+  renderQuickList();
+  syncSidebarAccount();
+  if (lbOpen) renderBoardPage();
+  refreshBoard();
+}
+
+// Wire the leaderboard window's static controls once.
+(() => {
+  const close = $('lb-close'); if (close) close.addEventListener('click', closeLeaderboard);
+  const bd = $('leaderboard');
+  if (bd) bd.addEventListener('click', (e) => { if (e.target === bd) closeLeaderboard(); });   // click the dim desktop to close
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && lbOpen) closeLeaderboard(); });
+})();
 
 // Reload the list of HUB-added games, apply play counts, sort most-played first.
 async function refreshGames() {
@@ -1365,97 +1478,31 @@ function startHub(logoImage, doorImage) {
   }
 
   function buildLeaderboard(y, cw, wide) {
-    const rows = board[board.scope];               // null until loaded
-    const topN = wide ? 10 : 8;
-    const shown = rows ? rows.slice(0, topN) : [];
-    const myName = backend.me ? backend.me.username : null;
-    const scopeTitle = board.scope === 'week' ? 'Weekly' : board.scope === 'epic' ? 'Epic Points' : 'All-Time';
-    const unit = board.scope === 'epic' ? 'EP' : 'XP';
-
-    // heading
+    // The full rankings live on their own page now (openLeaderboard). Here we
+    // just tease it and keep the quick actions (daily reward, join).
     const head = panel(cw, 84, (g) => {
       g.textBaseline = 'alphabetic';
       g.font = `bold 34px ${COMIC}`;
-      g.fillStyle = C.magenta; g.fillText('Leaderboard', 3, 39);
-      g.fillStyle = C.yellow;  g.fillText('Leaderboard', 0, 36);
+      g.fillStyle = C.magenta; g.fillText('Leaderboards', 3, 39);
+      g.fillStyle = C.yellow;  g.fillText('Leaderboards', 0, 36);
       g.font = `italic 18px ${TIMES}`;
       g.fillStyle = '#ffffff';
-      g.fillText('Grab a username and climb — XP for playing, diamonds for the shop, Epic Points from the clicker!', 0, 68);
+      g.fillText('XP for playing, diamonds from daily rewards, Epic Points from the clicker — see where you rank!', 0, 68);
     });
     place(head, 0, y, 84); page.add(head);
-    y += 84 + 14;
+    y += 84 + 16;
 
-    // Weekly / All-time / Epic toggle
-    const tw = wide ? 150 : 110, th = 40, tgap = 10;
-    const defs = [['This Week', 'week'], ['All-Time', 'all'], ['Epic', 'epic']];
-    const totalW = defs.length * tw + (defs.length - 1) * tgap;
-    defs.forEach(([label, scope], i) => {
-      const btn = button(label, tw, th, { down: board.scope === scope, size: 15 });
-      place(btn, -totalW / 2 + tw / 2 + i * (tw + tgap), y, th);
-      page.add(btn);
-      interactive(btn, 'page', () => { board.scope = scope; hub.rebuild(); }, (on) => btn.userData.setHover(on));
-    });
-    y += th + 14;
+    // the one button that opens the standalone page
+    y = buttonRow([{ label: '🏆 Open the Leaderboards', w: wide ? 320 : 280, act: () => openLeaderboard() }], y, cw, wide);
+    y += 4;
 
-    // the ranked list, as a Windows 95 window
-    const rowH = 34;
-    const listRows = shown.length || 2;
-    const winH = 40 + listRows * rowH + 14;
-    const lw = Math.min(cw, 720);
-    const boardPanel = panel(lw, winH, (g, w, ph) => {
-      bevel(g, 0, 0, w, ph);
-      const bar = g.createLinearGradient(6, 0, w - 6, 0);
-      bar.addColorStop(0, C.navy); bar.addColorStop(1, '#1084D0');
-      g.fillStyle = bar; g.fillRect(6, 6, w - 12, 26);
-      g.textAlign = 'left'; g.textBaseline = 'middle';
-      g.fillStyle = '#fff'; g.font = `bold 14px ${SANS}`;
-      g.fillText(scopeTitle + ' Top ' + topN + '.exe', 12, 20);
-
-      const lx = 10, ly0 = 40, lwid = w - 20, lht = ph - ly0 - 10;
-      bevel(g, lx, ly0, lwid, lht, { pressed: true, fill: '#fff' });
-      g.textBaseline = 'middle';
-      if (!rows || !shown.length) {
-        g.fillStyle = '#555'; g.font = `italic 16px ${TIMES}`; g.textAlign = 'center';
-        g.fillText(!rows ? 'Loading…' : 'No one yet — play a game to be first!', w / 2, ly0 + lht / 2);
-        return;
-      }
-      const medal = ['#D4AF37', '#9AA4AF', '#CD7F32'];   // gold / silver / bronze
-      shown.forEach((p, i) => {
-        const ry = ly0 + 4 + i * rowH;
-        const mine = p.username === myName;
-        if (mine) { g.fillStyle = '#FFF6B0'; g.fillRect(lx + 3, ry, lwid - 6, rowH - 2); }
-        g.textAlign = 'right';
-        g.font = `bold 17px ${MONO}`;
-        g.fillStyle = i < 3 ? medal[i] : '#666';
-        g.fillText('#' + (i + 1), lx + 46, ry + rowH / 2);
-        g.textAlign = 'left';
-        g.font = `bold 17px ${TIMES}`;
-        g.fillStyle = p.rank === 'owner' ? '#B8860B' : p.rank === 'admin' ? '#0000CC' : '#000';
-        const name = p.username + (mine ? ' (you)' : '');
-        g.fillText(name, lx + 58, ry + rowH / 2);
-        const nameEnd = lx + 58 + g.measureText(name).width;
-        const badge = p.rank === 'owner' ? '♔' : p.rank === 'admin' ? '★' : '';
-        if (badge) { g.font = `15px ${TIMES}`; g.fillText(badge, nameEnd + 10, ry + rowH / 2 - 1); }
-        g.textAlign = 'right';
-        g.font = `bold 16px ${SANS}`;
-        g.fillStyle = '#006400';
-        g.fillText((p.score || 0).toLocaleString() + ' ' + unit, lx + lwid - 12, ry + rowH / 2);
-      });
-    });
-    place(boardPanel, 0, y, winH); page.add(boardPanel);
-    y += winH + 14;
-
-    // your stats + actions
+    // your stats + quick actions
     if (backend.configured && backend.me) {
       const me = backend.me;
-      const myRows = rows || [];
-      const pos = myRows.findIndex((p) => p.username === me.username);
-      const scoreNow = board.scope === 'epic' ? (me.epicPoints || 0) : board.scope === 'week' ? me.weeklyXp : me.xp;
       const stats = [
-        pos >= 0 ? 'Rank #' + (pos + 1) : 'Unranked',
-        scoreNow.toLocaleString() + ' ' + unit,
-        me.diamonds.toLocaleString() + ' diamonds',
-        me.streak + ' day streak',
+        (me.xp || 0).toLocaleString() + ' XP',
+        (me.diamonds || 0).toLocaleString() + ' diamonds',
+        (me.streak || 0) + ' day streak',
       ].join('   •   ');
       const stripH = wide ? 46 : 58;
       const strip = panel(Math.min(cw, 720), stripH, (g, w, ph) => {
@@ -1998,7 +2045,12 @@ function setupSidebar() {
   const bar = $('sidebar');
   if (!bar) return;
   const closeDrawer = () => document.body.classList.remove('sidebar-open');   // only matters on narrow screens
-  bar.querySelectorAll('[data-go]').forEach((btn) => btn.addEventListener('click', () => { if (hub) hub.scrollToSection(btn.dataset.go); closeDrawer(); }));
+  bar.querySelectorAll('[data-go]').forEach((btn) => btn.addEventListener('click', () => {
+    // "Scores" is its own page now; everything else is a spot on the main scroll.
+    if (btn.dataset.go === 'board') openLeaderboard();
+    else if (hub) hub.scrollToSection(btn.dataset.go);
+    closeDrawer();
+  }));
   bar.querySelector('[data-act="request"]').addEventListener('click', () => { window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'); closeDrawer(); });
   bar.querySelector('[data-act="account"]').addEventListener('click', () => { openAccountOrAuth(); closeDrawer(); });
   const musicBtn = bar.querySelector('[data-act="music"]');
@@ -2032,8 +2084,8 @@ async function boot() {
     document.body.classList.add('no-webgl');
   }
   // Accounts load in the background so a sleeping server never blocks the page.
-  dialogs.setHooks({ toast, gamesChanged: refreshGames });
-  backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); });
+  dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed });
+  backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); if (lbOpen) renderBoardPage(); });
   backend.start().then(() => Promise.all([refreshGames(), refreshBoard(), backend.getNews().then(renderNews)])).then(() => {
     syncNewsEdit();
     const linked = gameFromHash();           // a share link to a HUB-added game
@@ -2050,6 +2102,8 @@ async function boot() {
       board: () => board,
       me: () => backend.me,
       openGame, closeGame,
+      openLeaderboard, closeLeaderboard,
+      setBoardScope: (s) => { board.scope = s; renderBoardPage(); },
     };
   }
 

@@ -163,6 +163,25 @@ export async function setRank(id, rank) {
   if (!data || !data.length) throw new Error('Your rank is not allowed to do that.');
 }
 
+// Change your own username, any time. The "edit own profile" policy lets a
+// signed-in player update their own row; the unique index stops clashes.
+export async function renameUser(username) {
+  need();
+  if (!me) throw new Error('Pick a username first.');
+  username = (username || '').trim();
+  if (!USERNAME_RULE.test(username)) throw new Error('Usernames are 3-20 letters, numbers or underscores.');
+  if (username.toLowerCase() === (me.username || '').toLowerCase()) { me.username = username; return; }
+  const esc = username.replace(/_/g, '\\_');
+  const taken = await db.from('profiles').select('id').ilike('username', esc).neq('id', me.id).limit(1);
+  if (taken.data && taken.data.length) throw new Error('That username is taken — try another.');
+  const { data, error } = await db.from('profiles').update({ username }).eq('id', me.id).select('username');
+  if (error) throw (error.code === '23505' ? new Error('That username is taken — try another.') : fail(error));
+  if (!data || !data.length) throw new Error("Couldn't change your name — try again.");
+  me.username = data[0].username;
+  // keep auth metadata in step (best-effort; the board reads the profiles row)
+  await db.auth.updateUser({ data: { username: me.username } }).then(() => {}, () => {});
+}
+
 /* -------------------------------- games ------------------------------- */
 
 const publicUrl = (bucket, path) => db.storage.from(bucket).getPublicUrl(path).data.publicUrl;
@@ -377,7 +396,10 @@ export async function deleteComment(id) {
 // Fetch the top players. scope is 'week' or 'all'. Readable even signed out.
 export async function leaderboard(scope) {
   if (!db) return [];
-  const view = scope === 'all' ? 'hub_board_alltime' : scope === 'epic' ? 'hub_board_epic' : 'hub_board_weekly';
+  const view = scope === 'all' ? 'hub_board_alltime'
+    : scope === 'diamonds' ? 'hub_board_diamonds'
+    : scope === 'epic' ? 'hub_board_epic'
+    : 'hub_board_weekly';
   const { data, error } = await db.from(view).select('username, rank, score');
   if (error) throw fail(error);
   // bigint (Epic Points) can arrive as a string from PostgREST — coerce to a number.

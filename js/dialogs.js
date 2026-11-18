@@ -122,6 +122,7 @@ export function openAccount() {
       '  •  ', el('strong', {}, (me.diamonds || 0).toLocaleString()), ' diamonds',
       '  •  ', el('strong', {}, String(me.streak || 0)), ' day streak'),
     el('div', { className: 'win-actions stack' },
+      el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openRename(); } }, 'Change name…'),
       backend.isStaff() ? el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openAddGame(); } }, 'Add a game…') : null,
       el('button', { type: 'button', className: 'win-btn', onclick: () => { dlg.close(); openMembers(); } }, 'Members…'),
       el('button', { type: 'button', className: 'win-btn', onclick: async () => {
@@ -131,6 +132,35 @@ export function openAccount() {
       } }, 'Sign Out')),
   );
   const dlg = openWindow('My Account', body, 320);
+}
+
+/* ------------------------------ change name ------------------------------ */
+
+export function openRename() {
+  const me = backend.me;
+  if (!me) return openAuth();
+  const username = el('input', { type: 'text', name: 'username', autocomplete: 'off', maxLength: 20, spellcheck: false, value: me.username });
+  const status = el('p', { className: 'win-status', role: 'alert' });
+
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Changing your name…', async () => {
+      await backend.renameUser(username.value.trim());
+      dlg.close();
+      hooks.toast('Name changed — you’re now ' + backend.me.username + '!');
+      if (hooks.renamed) hooks.renamed();
+    });
+  } },
+    el('p', { className: 'win-small' }, 'Pick a new username — it updates everywhere, in your comments and on the leaderboards.'),
+    field('Username', username, '3-20 letters, numbers or underscores'),
+    status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Save'),
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel')),
+  );
+
+  const dlg = openWindow('Change Name', form, 340);
+  username.focus(); username.select();
 }
 
 /* -------------------------------- members -------------------------------- */

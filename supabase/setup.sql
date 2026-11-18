@@ -479,3 +479,30 @@ create policy "staff write settings" on public.settings for all to authenticated
 
 grant select on public.settings to anon, authenticated;
 grant insert, update on public.settings to authenticated;
+
+-- ------------------------------------------------- standalone leaderboard page
+-- The leaderboards live on their own full-screen page with a tab per point
+-- type. Each board shows everyone (limit 500, effectively all for this hub),
+-- not just a top handful. Diamonds joins XP and Epic Points as its own board.
+create or replace view public.hub_board_diamonds with (security_invoker = true) as
+  select username, rank, diamonds as score from public.profiles
+  where diamonds > 0 order by diamonds desc, username limit 500;
+
+create or replace view public.hub_board_alltime with (security_invoker = true) as
+  select username, rank, xp as score from public.profiles
+  where xp > 0 order by xp desc, username limit 500;
+
+create or replace view public.hub_board_epic with (security_invoker = true) as
+  select username, rank, epic_points as score from public.profiles
+  where epic_points > 0 order by epic_points desc, username limit 500;
+
+create or replace view public.hub_board_weekly with (security_invoker = true) as
+  select username, rank, weekly_xp as score from public.profiles
+  where week_key = public.hub_week_key() and weekly_xp > 0
+  order by weekly_xp desc, username limit 500;
+
+grant select on public.hub_board_diamonds to anon, authenticated;
+
+-- Players can rename themselves any time: the "edit own profile" policy above
+-- already allows updating username (grant update (username) on profiles), and
+-- the unique index profiles_username_key enforces one name per person.
