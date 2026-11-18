@@ -440,6 +440,16 @@ tr.lb-me td { background: #FFF6B0; }
   border: 1px solid #000; letter-spacing: 1px; }
 .counter-hint { font: italic 12px var(--sans); color: #d6d6e0; }
 
+/* staff: shop-management toolbar + per-pack edit/delete */
+.shop-manage { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 8px 12px;
+  background: rgba(255,255,255,0.78); box-shadow: var(--raised); font: bold 13px var(--sans); color: #333; }
+.shop-manage span { flex: 1; }
+.pack-staff { position: absolute; top: 6px; left: 6px; display: flex; gap: 4px; }
+.pack-staff button { width: 24px; height: 24px; border: 1px solid #000; background: #fff; cursor: pointer;
+  font-size: 12px; line-height: 1; box-shadow: 1px 1px 0 rgba(0,0,0,0.4); padding: 0; }
+.pack-staff button:hover { background: #ffe14d; }
+.win-btn.danger { color: #a00; font-weight: bold; }
+
 /* the flying pack that heads to the counter */
 .pack-fly { position: fixed; z-index: 760; pointer-events: none; width: 150px;
   transition: transform .62s cubic-bezier(.5,-0.3,.4,1.2), opacity .5s; }

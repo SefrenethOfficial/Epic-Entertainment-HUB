@@ -656,13 +656,24 @@ function renderShop() {
   if (!aisle) return;
   if (wallet) wallet.textContent = '💎 ' + (backend.me ? (backend.me.diamonds || 0).toLocaleString() : '—');
   const items = shopCatalog || [];
-  if (!items.length) { aisle.replaceChildren(mk('p', { class: 'lb-note' }, 'Shelves are being restocked…')); return; }
-  const shelves = [];
-  for (let i = 0; i < items.length; i += 3) shelves.push(items.slice(i, i + 3));
-  aisle.replaceChildren(...shelves.map((group, si) => mk('div', { class: 'shelf' },
-    mk('div', { class: 'shelf-label' }, si === 0 ? 'FACE PACKS · AISLE 1' : 'AISLE ' + (si + 1)),
-    mk('div', { class: 'shelf-row' }, ...group.map((it) => packEl(it))),
-    mk('div', { class: 'shelf-board' }))));
+  const blocks = [];
+  if (backend.isStaff()) {   // staff get a shelf-management toolbar
+    blocks.push(mk('div', { class: 'shop-manage' },
+      mk('span', {}, '🛠 Editor tools'),
+      mk('button', { class: 'lb-btn', type: 'button', onclick: () => dialogs.openAddFace() }, '+ Add a face')));
+  }
+  if (!items.length) {
+    blocks.push(mk('p', { class: 'lb-note' }, 'Shelves are being restocked…'));
+  } else {
+    for (let i = 0; i < items.length; i += 3) {
+      const group = items.slice(i, i + 3), si = i / 3;
+      blocks.push(mk('div', { class: 'shelf' },
+        mk('div', { class: 'shelf-label' }, si === 0 ? 'FACE PACKS · AISLE 1' : 'AISLE ' + (si + 1)),
+        mk('div', { class: 'shelf-row' }, ...group.map((it) => packEl(it))),
+        mk('div', { class: 'shelf-board' })));
+    }
+  }
+  aisle.replaceChildren(...blocks);
 }
 
 function packEl(it) {
@@ -676,15 +687,32 @@ function packEl(it) {
     onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); packTap(it, el); } },
   },
     mk('div', { class: 'pack-top' }, RARITY_LABEL[it.rarity] || 'FACE'),
-    mk('div', { class: 'pack-window' }, mk('img', { src: backend.pfpSrc(it.id), alt: it.name, draggable: false })),
+    mk('div', { class: 'pack-window' }, mk('img', { src: it.src || backend.pfpSrc(it.id), alt: it.name, draggable: false })),
     mk('div', { class: 'pack-name' }, it.name),
     equipped ? mk('div', { class: 'pack-price' }, 'Equipped')
       : owned ? mk('div', { class: 'pack-price' }, 'Equip')
       : mk('div', { class: 'pack-price' + (it.price ? '' : ' free') }, it.price ? '💎 ' + it.price : 'FREE'),
     equipped ? mk('div', { class: 'pack-ribbon' }, '✓ ON')
       : owned ? mk('div', { class: 'pack-ribbon' }, 'OWNED') : null,
+    backend.isStaff() ? mk('div', { class: 'pack-staff' },
+      mk('button', { type: 'button', title: 'Edit', onclick: (e) => { e.stopPropagation(); dialogs.openEditFace(it); } }, '✎'),
+      it.id === 'classic' ? null
+        : mk('button', { type: 'button', title: 'Delete', onclick: (e) => { e.stopPropagation(); deleteFaceFlow(it); } }, '🗑')) : null,
   );
   return el;
+}
+
+async function deleteFaceFlow(it) {
+  const yes = await dialogs.confirmWindow('Remove "' + it.name + '" from the shop? Anyone wearing it goes back to the default face.', 'Delete');
+  if (!yes) return;
+  try { await backend.deletePfp(it.id); facesChanged(); toast('Removed ' + it.name + '.'); }
+  catch (e) { toast(e.message || 'Could not delete that.'); }
+}
+
+// Reload the catalogue after a staff change and refresh avatars everywhere.
+async function facesChanged() {
+  try { shopCatalog = await backend.loadFaces(); } catch (e) { /* keep what we have */ }
+  afterPfpChange();   // re-renders the shop + avatars
 }
 
 async function packTap(it, el) {
@@ -737,7 +765,7 @@ function runOpening(it, el) {
       const stage = $('pack-open');
       const foil = mk('div', { class: 'open-foil', style: '--foil:' + foilCol });
       const glow = mk('div', { class: 'open-glow' });
-      const face = mk('div', { class: 'open-face' }, mk('img', { src: backend.pfpSrc(it.id), alt: it.name, draggable: false }));
+      const face = mk('div', { class: 'open-face' }, mk('img', { src: it.src || backend.pfpSrc(it.id), alt: it.name, draggable: false }));
       const cap = mk('div', { class: 'open-caption' },
         mk('div', { class: 'got' }, 'You got ', mk('b', {}, it.name)),
         mk('div', { class: 'tap' }, 'tap to continue'));
@@ -2275,8 +2303,9 @@ async function boot() {
     document.body.classList.add('no-webgl');
   }
   // Accounts load in the background so a sleeping server never blocks the page.
-  dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed });
+  dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed, facesChanged, deleteFace: deleteFaceFlow });
   backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); if (lbOpen) renderBoardPage(); if (shopOpen) renderShop(); });
+  backend.loadFaces().then(() => { if (hub) hub.rebuild(); syncSidebarAccount(); });   // resolve uploaded-face avatars
   backend.start().then(() => Promise.all([refreshGames(), refreshBoard(), backend.getNews().then(renderNews)])).then(() => {
     syncNewsEdit();
     const linked = gameFromHash();           // a share link to a HUB-added game

@@ -572,3 +572,24 @@ create view public.hub_board_weekly with (security_invoker = true) as
   where week_key = public.hub_week_key() and weekly_xp > 0 order by weekly_xp desc, username limit 500;
 grant select on public.hub_board_alltime, public.hub_board_diamonds,
   public.hub_board_epic, public.hub_board_weekly to anon, authenticated;
+
+-- ------------------------------------------------- shop: staff manage faces
+-- Owners/Admins can add, edit and delete faces. Uploaded faces store image_url
+-- (built-ins fall back to assets/pfp/<id>.png). Deleting a face frees everyone
+-- who owns or wears it; the classic face is the default and can't be removed.
+alter table public.pfp_items add column if not exists image_url text;
+drop policy if exists "pfp items staff write" on public.pfp_items;
+create policy "pfp items staff write" on public.pfp_items for all to authenticated
+  using (public.my_rank() in ('owner', 'admin')) with check (public.my_rank() in ('owner', 'admin'));
+grant insert, update, delete on public.pfp_items to authenticated;
+
+create or replace function public.hub_delete_pfp(p_face text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if public.my_rank() not in ('owner', 'admin') then raise exception 'Only staff can do that'; end if;
+  if p_face = 'classic' then raise exception 'The default face can''t be removed'; end if;
+  delete from public.pfp_items where id = p_face;
+  update public.profiles set owned_pfps = array_remove(owned_pfps, p_face) where p_face = any(owned_pfps);
+  update public.profiles set pfp = 'classic' where pfp = p_face;
+end $$;
+grant execute on function public.hub_delete_pfp(text) to authenticated;

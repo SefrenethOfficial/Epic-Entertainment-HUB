@@ -189,10 +189,9 @@ export async function renameUser(username) {
 // The face a player has equipped drives their avatar everywhere. Default is the
 // classic Awesome Face.
 export const DEFAULT_PFP = 'classic';
-export const pfpSrc = (id) => 'assets/pfp/' + (id || DEFAULT_PFP) + '.png';
+export const RARITIES = ['starter', 'common', 'uncommon', 'rare', 'legendary'];
 
-// The catalogue, from the DB (prices are authoritative there). Sorted for the
-// shelves. Falls back to a built-in list if the table can't be read.
+// Built-in faces, used until the catalogue loads (and if the DB can't be read).
 const FALLBACK_ITEMS = [
   { id: 'classic', name: 'Awesome Face', price: 0, rarity: 'starter', sort: 0 },
   { id: 'nerd', name: 'Specs Face', price: 50, rarity: 'common', sort: 1 },
@@ -200,14 +199,94 @@ const FALLBACK_ITEMS = [
   { id: 'patch', name: 'Patch Face', price: 200, rarity: 'rare', sort: 3 },
   { id: 'zombie', name: 'Undead Face', price: 300, rarity: 'legendary', sort: 4 },
 ];
-export async function shopItems() {
-  if (!db) return FALLBACK_ITEMS;
-  const { data, error } = await db.from('pfp_items').select('id, name, price, rarity, sort').order('sort');
-  if (error || !data || !data.length) return FALLBACK_ITEMS;
-  return data.map((r) => ({ ...r, price: Number(r.price) || 0 }));
+const builtinSrc = (id) => 'assets/pfp/' + (id || DEFAULT_PFP) + '.png';
+const withSrc = (r) => ({ ...r, price: Number(r.price) || 0, src: r.image_url || builtinSrc(r.id) });
+
+// Catalogue cache + an id→image map so any avatar (built-in or staff-uploaded)
+// resolves without another round-trip. Seeded from the built-ins immediately.
+let faceCatalog = FALLBACK_ITEMS.map(withSrc);
+let faceMap = Object.fromEntries(faceCatalog.map((f) => [f.id, f.src]));
+let facesLoaded = false;
+
+// The face image URL for an id. Works for uploaded faces too (via the cache).
+export function pfpSrc(id) { return (faceMap && faceMap[id]) || builtinSrc(id); }
+
+// Load the catalogue from the DB into the cache. Call once on boot and after edits.
+export async function loadFaces() {
+  if (!db) return faceCatalog;
+  const { data, error } = await db.from('pfp_items').select('id, name, price, rarity, sort, image_url').order('sort');
+  if (!error && data && data.length) {
+    faceCatalog = data.map(withSrc);
+    faceMap = Object.fromEntries(faceCatalog.map((f) => [f.id, f.src]));
+  }
+  facesLoaded = true;
+  return faceCatalog;
 }
+export async function shopItems() { if (db && !facesLoaded) await loadFaces(); return faceCatalog; }
 
 export function owns(face) { return Boolean(me && (me.owned || []).includes(face)); }
+
+/* ---- staff: manage the catalogue ---- */
+
+const slugify = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 20);
+
+// Add a face: upload the image (or use an address), insert the catalogue row.
+export async function addPfp({ name, price, rarity, imageFile, imageUrl }) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage faces.');
+  name = (name || '').trim();
+  if (name.length < 2) throw new Error('Give the face a name.');
+  if (!imageFile && !(imageUrl || '').trim()) throw new Error('Add an image file or an image address.');
+  let base = slugify(name) || 'face';
+  if (base.length < 3) base = 'face_' + base;
+  const existing = new Set((faceCatalog || []).map((f) => f.id));
+  let id = base, n = 2;
+  while (existing.has(id)) id = (base + '_' + n++).slice(0, 24);
+  let src = (imageUrl || '').trim();
+  if (imageFile) {
+    const path = await upload('game-images', imageFile, randomName(IMG_EXT[imageFile.type] || '.png'), imageFile.type);
+    src = publicUrl('game-images', path);
+  }
+  const sort = (faceCatalog || []).reduce((m, f) => Math.max(m, f.sort || 0), 0) + 1;
+  const row = { id, name, price: Math.max(0, Math.round(Number(price) || 0)),
+    rarity: RARITIES.includes(rarity) ? rarity : 'common', sort, image_url: src };
+  const { error } = await db.from('pfp_items').insert(row);
+  if (error) throw fail(error);
+  await loadFaces();
+  return id;
+}
+
+// Edit a face's stats (and optionally its image).
+export async function editPfp(id, { name, price, rarity, sort, imageFile, imageUrl }) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage faces.');
+  const patch = {};
+  if (name != null && name.trim()) patch.name = name.trim();
+  if (price != null && price !== '') patch.price = Math.max(0, Math.round(Number(price) || 0));
+  if (rarity && RARITIES.includes(rarity)) patch.rarity = rarity;
+  if (sort != null && sort !== '') patch.sort = Math.round(Number(sort) || 0);
+  if (imageFile) {
+    const path = await upload('game-images', imageFile, randomName(IMG_EXT[imageFile.type] || '.png'), imageFile.type);
+    patch.image_url = publicUrl('game-images', path);
+  } else if ((imageUrl || '').trim()) patch.image_url = imageUrl.trim();
+  if (!Object.keys(patch).length) return;
+  const { error } = await db.from('pfp_items').update(patch).eq('id', id);
+  if (error) throw fail(error);
+  await loadFaces();
+}
+
+// Delete a face. Server frees anyone who owns or wears it.
+export async function deletePfp(id) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage faces.');
+  const { error } = await db.rpc('hub_delete_pfp', { p_face: id });
+  if (error) throw fail(error);
+  if (me) {   // mirror the server's cleanup locally
+    me.owned = (me.owned || []).filter((f) => f !== id);
+    if (me.pfp === id) me.pfp = DEFAULT_PFP;
+  }
+  await loadFaces();
+}
 
 // Buy a face (or equip it if already owned). Server deducts diamonds.
 export async function buyPfp(face) {

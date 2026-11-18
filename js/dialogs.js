@@ -165,6 +165,78 @@ export function openRename() {
   username.focus(); username.select();
 }
 
+/* --------------------------- shop: manage faces --------------------------- */
+
+const RARITY_OPTS = ['starter', 'common', 'uncommon', 'rare', 'legendary'];
+
+function faceForm(item) {
+  const name = el('input', { type: 'text', maxLength: 28, spellcheck: false, value: item ? item.name : '', placeholder: 'e.g. Cowboy Face' });
+  const price = el('input', { type: 'number', min: '0', step: '1', value: item ? String(item.price) : '0' });
+  const rarity = el('select', {}, ...RARITY_OPTS.map((r) => el('option', { value: r }, r[0].toUpperCase() + r.slice(1))));
+  rarity.value = item ? item.rarity : 'common';
+  const file = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif' });
+  const urlIn = el('input', { type: 'url', spellcheck: false, placeholder: 'https://… (or leave blank)' });
+  const sort = item ? el('input', { type: 'number', step: '1', value: String(item.sort || 0) }) : null;
+  return { name, price, rarity, file, urlIn, sort,
+    fields: [
+      field('Name', name),
+      field('Price (💎)', price),
+      field('Rarity', rarity),
+      field('Image file', file, item ? 'Leave empty to keep the current image' : 'A PNG with a see-through background looks best'),
+      field('…or image address', urlIn),
+      sort ? field('Shelf order', sort, 'Lower numbers sit first') : null,
+    ] };
+}
+
+export function openAddFace() {
+  if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can manage faces.');
+  const f = faceForm(null);
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Adding the face…', async () => {
+      await backend.addPfp({ name: f.name.value, price: f.price.value, rarity: f.rarity.value,
+        imageFile: f.file.files[0] || null, imageUrl: f.urlIn.value });
+      dlg.close();
+      hooks.toast('Added ' + f.name.value.trim() + ' to the shop!');
+      if (hooks.facesChanged) hooks.facesChanged();
+    });
+  } }, ...f.fields, status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Add to shop'),
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel')));
+  const dlg = openWindow('Add a face', form, 360);
+  f.name.focus();
+}
+
+export function openEditFace(item) {
+  if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can manage faces.');
+  const f = faceForm(item);
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Saving…', async () => {
+      await backend.editPfp(item.id, { name: f.name.value, price: f.price.value, rarity: f.rarity.value,
+        sort: f.sort ? f.sort.value : null, imageFile: f.file.files[0] || null, imageUrl: f.urlIn.value });
+      dlg.close();
+      hooks.toast('Saved ' + f.name.value.trim() + '.');
+      if (hooks.facesChanged) hooks.facesChanged();
+    });
+  } },
+    el('div', { className: 'win-avatar-row' }, el('img', { className: 'win-avatar', src: item.src || backend.pfpSrc(item.id), alt: '' }),
+      el('p', { className: 'win-small' }, 'Editing ', el('strong', {}, item.name))),
+    ...f.fields, status,
+    el('div', { className: 'win-actions' },
+      el('button', { type: 'submit', className: 'win-btn primary' }, 'Save'),
+      item.id === 'classic' ? null
+        : el('button', { type: 'button', className: 'win-btn danger', onclick: () => {
+            if (hooks.deleteFace) hooks.deleteFace(item); dlg.close();
+          } }, 'Delete'),
+      el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel')));
+  const dlg = openWindow('Edit face', form, 360);
+  f.name.focus();
+}
+
 /* -------------------------------- members -------------------------------- */
 
 export function openMembers() {
