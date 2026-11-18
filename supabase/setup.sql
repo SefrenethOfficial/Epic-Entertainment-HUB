@@ -617,3 +617,22 @@ create policy "shows staff write" on public.shows for all to authenticated
   using (public.my_rank() in ('owner', 'admin')) with check (public.my_rank() in ('owner', 'admin'));
 grant select on public.shows to anon, authenticated;
 grant insert, update, delete on public.shows to authenticated;
+
+-- ------------------------------------------------- shows: episodes
+-- Episodes belong to a show (movies use their own watch link). Cascade on
+-- show delete. Public read; owner/admin write.
+create table if not exists public.show_episodes (
+  id uuid primary key default gen_random_uuid(),
+  show_id uuid not null references public.shows(id) on delete cascade,
+  season int not null default 1, episode int not null default 1,
+  title text, watch_url text, created_at timestamptz not null default now()
+);
+create index if not exists show_episodes_order on public.show_episodes (show_id, season, episode);
+alter table public.show_episodes enable row level security;
+drop policy if exists "episodes public read" on public.show_episodes;
+create policy "episodes public read" on public.show_episodes for select using (true);
+drop policy if exists "episodes staff write" on public.show_episodes;
+create policy "episodes staff write" on public.show_episodes for all to authenticated
+  using (public.my_rank() in ('owner', 'admin')) with check (public.my_rank() in ('owner', 'admin'));
+grant select on public.show_episodes to anon, authenticated;
+grant insert, update, delete on public.show_episodes to authenticated;

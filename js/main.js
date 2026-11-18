@@ -932,7 +932,7 @@ function renderHero() {
         s.stars ? mk('span', { class: 'th-stars' }, stars(s.stars), mk('small', {}, s.stars.toFixed(1))) : null),
       s.description ? mk('p', { class: 'th-hero-desc' }, s.description) : null,
       mk('div', { class: 'th-hero-btns' },
-        mk('button', { class: 'th-btn play', type: 'button', onclick: () => (s.watchUrl ? openWatch(s) : openShowDetails(s)) }, '▶  Watch'),
+        mk('button', { class: 'th-btn play', type: 'button', onclick: () => ((s.kind === 'movie' && s.watchUrl) ? openWatch(s) : openShowDetails(s)) }, s.kind === 'movie' ? '▶  Watch' : '▶  Episodes'),
         mk('button', { class: 'th-btn more', type: 'button', onclick: () => openShowDetails(s) }, 'More info'))),
     feats.length > 1 ? mk('div', { class: 'th-dots' }, ...feats.map((_, i) =>
       mk('button', { class: 'th-dot' + (i === heroIdx ? ' on' : ''), type: 'button', onclick: () => { heroIdx = i; renderHero(); } }))) : null,
@@ -982,14 +982,17 @@ function cardFor(s) {
       mk('button', { type: 'button', title: 'Delete', onclick: (e) => { e.stopPropagation(); deleteShowFlow(s); } }, '🗑')) : null);
 }
 
+let detailsShow = null;
 function openShowDetails(s) {
   const m = $('th-modal');
   if (!m) return;
+  detailsShow = s;
   const top = mk('div', { class: 'th-sheet-top' },
     mk('button', { class: 'th-sheet-x', type: 'button', onclick: closeShowDetails }, '✕'),
     s.banner && !s.backdrop ? mk('img', { class: 'th-hero-banner', src: s.banner, alt: s.title })
       : mk('h2', { class: 'th-sheet-title' }, s.title));
   if (s.backdrop) top.style.backgroundImage = `url("${cssUrl(s.backdrop)}")`;
+  const epHost = s.kind === 'show' ? mk('div', { class: 'th-eps' }, mk('p', { class: 'th-eps-load' }, 'Loading episodes…')) : null;
   m.replaceChildren(mk('div', { class: 'th-sheet' }, top,
     mk('div', { class: 'th-sheet-body' },
       mk('div', { class: 'th-meta', style: 'margin-top:14px' },
@@ -998,11 +1001,38 @@ function openShowDetails(s) {
         s.stars ? mk('span', { class: 'th-stars' }, stars(s.stars), mk('small', {}, s.stars.toFixed(1))) : null),
       s.description ? mk('p', { class: 'th-sheet-desc' }, s.description) : mk('p', { class: 'th-sheet-desc' }, 'No description yet.'),
       mk('div', { class: 'th-hero-btns' },
-        s.watchUrl ? mk('button', { class: 'th-btn play', type: 'button', onclick: () => openWatch(s) }, '▶  Watch') : null,
-        backend.isStaff() ? mk('button', { class: 'th-btn more', type: 'button', onclick: () => { closeShowDetails(); dialogs.openEditShow(s); } }, 'Edit') : null))));
+        s.watchUrl ? mk('button', { class: 'th-btn play', type: 'button', onclick: () => openWatch(s) }, s.kind === 'movie' ? '▶  Watch' : '▶  Trailer') : null,
+        backend.isStaff() ? mk('button', { class: 'th-btn more', type: 'button', onclick: () => { closeShowDetails(); dialogs.openEditShow(s); } }, 'Edit') : null),
+      epHost)));
   m.hidden = false;
+  if (epHost) loadEpisodeList(s, epHost);
 }
-function closeShowDetails() { const m = $('th-modal'); if (m) { m.hidden = true; m.replaceChildren(); } }
+
+async function loadEpisodeList(s, host) {
+  let eps = [];
+  try { eps = await backend.listEpisodes(s.id); } catch (e) { host.replaceChildren(mk('p', { class: 'th-eps-load' }, 'Could not load episodes.')); return; }
+  if (!eps.length) {
+    host.replaceChildren(mk('p', { class: 'th-eps-load' },
+      backend.isStaff() ? 'No episodes yet — use “Edit → Manage episodes”.' : 'No episodes posted yet.'));
+    return;
+  }
+  const bySeason = {};
+  for (const ep of eps) (bySeason[ep.season] = bySeason[ep.season] || []).push(ep);
+  host.replaceChildren(...Object.keys(bySeason).map(Number).sort((a, b) => a - b).map((sn) =>
+    mk('div', { class: 'th-season' },
+      mk('h4', {}, 'Season ' + sn),
+      ...bySeason[sn].map((ep) => mk('button', {
+        class: 'th-ep' + (ep.watchUrl ? '' : ' noplay'), type: 'button',
+        title: ep.watchUrl ? 'Play' : 'No video link yet',
+        onclick: () => ep.watchUrl
+          ? openWatch({ title: s.title + ' · S' + ep.season + 'E' + ep.episode + (ep.title ? ' · ' + ep.title : ''), watchUrl: ep.watchUrl })
+          : toast('No video link on this episode yet.'),
+      },
+        mk('span', { class: 'th-ep-n' }, 'E' + ep.episode),
+        mk('span', { class: 'th-ep-t' }, ep.title || 'Episode ' + ep.episode),
+        mk('span', { class: 'th-ep-play' }, ep.watchUrl ? '▶' : ''))))));
+}
+function closeShowDetails() { const m = $('th-modal'); if (m) { m.hidden = true; m.replaceChildren(); } detailsShow = null; }
 
 function openWatch(s) {
   const w = $('th-watch'), frame = $('th-watch-frame'), title = $('th-watch-title');
@@ -1053,6 +1083,11 @@ async function deleteShowFlow(s) {
 async function showsChanged() {
   try { shows = await backend.listShows(); } catch (e) { /* keep what we have */ }
   if (theaterOpen) renderTheater();
+}
+
+// An episode was added/edited/removed — refresh the open details sheet if it's that show.
+function episodesChanged(showId) {
+  if (detailsShow && detailsShow.id === showId && $('th-modal') && !$('th-modal').hidden) openShowDetails(detailsShow);
 }
 
 // Wire the theater's static controls once.
@@ -2555,7 +2590,7 @@ async function boot() {
     document.body.classList.add('no-webgl');
   }
   // Accounts load in the background so a sleeping server never blocks the page.
-  dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed, facesChanged, deleteFace: deleteFaceFlow, showsChanged, deleteShow: deleteShowFlow });
+  dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed, facesChanged, deleteFace: deleteFaceFlow, showsChanged, deleteShow: deleteShowFlow, episodesChanged });
   backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); if (lbOpen) renderBoardPage(); if (shopOpen) renderShop(); });
   backend.loadFaces().then(() => { if (hub) hub.rebuild(); syncSidebarAccount(); });   // resolve uploaded-face avatars
   backend.start().then(() => Promise.all([refreshGames(), refreshBoard(), backend.getNews().then(renderNews)])).then(() => {

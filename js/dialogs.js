@@ -277,7 +277,7 @@ function showForm(item) {
     featLabel,
     sort ? field('Shelf order', sort, 'Lower numbers first') : null,
   ];
-  return { get, fields, focus: title };
+  return { get, fields, focus: title, kind };
 }
 
 export function openAddShow() {
@@ -304,6 +304,12 @@ export function openEditShow(item) {
   if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can manage shows.');
   const f = showForm(item);
   const status = el('p', { className: 'win-status', role: 'alert' });
+
+  // Episodes are only for shows; the button shows/hides with the Type select.
+  const epBtn = el('button', { type: 'button', className: 'win-btn', onclick: () => openEpisodes(item) }, 'Manage episodes…');
+  const syncEp = () => { epBtn.style.display = f.kind.value === 'show' ? '' : 'none'; };
+  f.kind.addEventListener('change', syncEp); syncEp();
+
   const form = el('form', { className: 'win-form', onsubmit: (e) => {
     e.preventDefault();
     run(form, status, 'Saving…', async () => {
@@ -312,13 +318,89 @@ export function openEditShow(item) {
       hooks.toast('Saved ' + item.title + '.');
       if (hooks.showsChanged) hooks.showsChanged();
     });
-  } }, ...f.fields, status,
+  } }, ...f.fields, epBtn, status,
     el('div', { className: 'win-actions' },
       el('button', { type: 'submit', className: 'win-btn primary' }, 'Save'),
       el('button', { type: 'button', className: 'win-btn danger', onclick: () => { if (hooks.deleteShow) hooks.deleteShow(item); dlg.close(); } }, 'Delete'),
       el('button', { type: 'button', className: 'win-btn', onclick: () => dlg.close() }, 'Cancel')));
   const dlg = openWindow('Edit title', form, 380);
   f.focus.focus();
+}
+
+// Add / edit / delete a show's episodes, grouped by season. Add anytime.
+export function openEpisodes(show) {
+  if (!backend.isStaff()) return hooks.toast('Only Owners and Admins can manage episodes.');
+  const listEl = el('div', { className: 'ep-list' }, 'Loading…');
+  const status = el('p', { className: 'win-status', role: 'alert' });
+  let editingId = null;
+
+  const season = el('input', { type: 'number', min: '1', step: '1', value: '1' });
+  const episode = el('input', { type: 'number', min: '1', step: '1', value: '1' });
+  const title = el('input', { type: 'text', maxLength: 80, spellcheck: false, placeholder: 'Episode title (optional)' });
+  const watch = el('input', { type: 'url', spellcheck: false, placeholder: 'https://… video link' });
+  const submitBtn = el('button', { type: 'submit', className: 'win-btn primary' }, 'Add episode');
+
+  function resetForm() { editingId = null; title.value = ''; watch.value = ''; submitBtn.textContent = 'Add episode'; }
+  function loadEp(ep) {
+    editingId = ep.id; season.value = ep.season; episode.value = ep.episode;
+    title.value = ep.title || ''; watch.value = ep.watchUrl || '';
+    submitBtn.textContent = 'Save episode'; title.focus();
+  }
+
+  async function refresh() {
+    let eps;
+    try { eps = await backend.listEpisodes(show.id); } catch (e) { listEl.textContent = e.message; return; }
+    if (!eps.length) {
+      listEl.replaceChildren(el('p', { className: 'win-small' }, 'No episodes yet — add your first below.'));
+      if (!editingId) { season.value = '1'; episode.value = '1'; }
+      return;
+    }
+    const bySeason = {};
+    for (const ep of eps) (bySeason[ep.season] = bySeason[ep.season] || []).push(ep);
+    const blocks = Object.keys(bySeason).map(Number).sort((a, b) => a - b).map((sn) =>
+      el('div', { className: 'ep-season' },
+        el('div', { className: 'ep-season-h' }, 'Season ' + sn),
+        ...bySeason[sn].map((ep) => el('div', { className: 'ep-row' },
+          el('span', { className: 'ep-tag' }, 'E' + ep.episode),
+          el('span', { className: 'ep-name' }, ep.title || 'Untitled'),
+          el('span', { className: 'ep-link' + (ep.watchUrl ? ' set' : '') }, ep.watchUrl ? '▶ link' : 'no link'),
+          el('button', { type: 'button', className: 'ep-btn', title: 'Edit', onclick: () => loadEp(ep) }, '✎'),
+          el('button', { type: 'button', className: 'ep-btn', title: 'Delete', onclick: () => delEp(ep) }, '🗑')))));
+    listEl.replaceChildren(...blocks);
+    if (!editingId) {   // prefill the next episode number of the latest season
+      const lastSn = Math.max(...eps.map((e) => e.season));
+      const maxEp = Math.max(...eps.filter((e) => e.season === lastSn).map((e) => e.episode));
+      season.value = String(lastSn); episode.value = String(maxEp + 1);
+    }
+  }
+
+  async function delEp(ep) {
+    const yes = await confirmWindow('Delete S' + ep.season + 'E' + ep.episode + (ep.title ? ' “' + ep.title + '”' : '') + '?', 'Delete');
+    if (!yes) return;
+    try { await backend.deleteEpisode(ep.id); if (editingId === ep.id) resetForm(); await refresh(); if (hooks.episodesChanged) hooks.episodesChanged(show.id); }
+    catch (e) { status.className = 'win-status error'; status.textContent = e.message; }
+  }
+
+  const form = el('form', { className: 'win-form', onsubmit: (e) => {
+    e.preventDefault();
+    run(form, status, 'Saving…', async () => {
+      const vals = { season: season.value, episode: episode.value, title: title.value, watchUrl: watch.value };
+      if (editingId) await backend.editEpisode(editingId, vals); else await backend.addEpisode(show.id, vals);
+      resetForm();
+      await refresh();
+      if (hooks.episodesChanged) hooks.episodesChanged(show.id);
+    });
+  } },
+    el('div', { className: 'ep-formrow' }, field('Season', season), field('Episode', episode)),
+    field('Title', title),
+    field('Watch link', watch, 'YouTube/Drive — a Drive file must be shared “Anyone with the link”.'),
+    status,
+    el('div', { className: 'win-actions' }, submitBtn,
+      el('button', { type: 'button', className: 'win-btn', onclick: resetForm }, 'Clear')));
+
+  const dlg = openWindow('Episodes — ' + show.title, el('div', { className: 'win-form' },
+    listEl, el('hr', { className: 'ep-hr' }), form), 440);
+  refresh();
 }
 
 /* -------------------------------- members -------------------------------- */

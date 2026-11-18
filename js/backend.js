@@ -397,6 +397,56 @@ export async function deleteShow(id) {
   if (error) throw fail(error);
 }
 
+/* ---- episodes (for shows) ---- */
+
+function toEpisode(row) {
+  return { id: row.id, showId: row.show_id, season: Number(row.season) || 1,
+    episode: Number(row.episode) || 1, title: row.title || '', watchUrl: row.watch_url || null };
+}
+
+export async function listEpisodes(showId) {
+  if (!db) return [];
+  const { data, error } = await db.from('show_episodes').select('*').eq('show_id', showId)
+    .order('season').order('episode').limit(1000);
+  if (error) throw fail(error);
+  return data.map(toEpisode).sort((a, b) => a.season - b.season || a.episode - b.episode);
+}
+
+export async function addEpisode(showId, { season, episode, title, watchUrl }) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage episodes.');
+  const row = {
+    show_id: showId,
+    season: Math.max(1, Math.round(Number(season) || 1)),
+    episode: Math.max(1, Math.round(Number(episode) || 1)),
+    title: (title || '').trim() || null,
+    watch_url: (watchUrl || '').trim() || null,
+  };
+  const { data, error } = await db.from('show_episodes').insert(row).select('*');
+  if (error) throw fail(error);
+  return toEpisode(Array.isArray(data) ? data[0] : data);
+}
+
+export async function editEpisode(id, { season, episode, title, watchUrl }) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage episodes.');
+  const patch = {};
+  if (season !== undefined && season !== '') patch.season = Math.max(1, Math.round(Number(season) || 1));
+  if (episode !== undefined && episode !== '') patch.episode = Math.max(1, Math.round(Number(episode) || 1));
+  if (title !== undefined) patch.title = (title || '').trim() || null;
+  if (watchUrl !== undefined) patch.watch_url = (watchUrl || '').trim() || null;
+  if (!Object.keys(patch).length) return;
+  const { error } = await db.from('show_episodes').update(patch).eq('id', id);
+  if (error) throw fail(error);
+}
+
+export async function deleteEpisode(id) {
+  need();
+  if (!isStaff()) throw new Error('Only Owners and Admins can manage episodes.');
+  const { error } = await db.from('show_episodes').delete().eq('id', id);
+  if (error) throw fail(error);
+}
+
 /* -------------------------------- games ------------------------------- */
 
 const publicUrl = (bucket, path) => db.storage.from(bucket).getPublicUrl(path).data.publicUrl;
