@@ -70,12 +70,29 @@
   </div>
 </div>
 
+<div id="shop" hidden>
+  <div class="shop-win" role="dialog" aria-label="Face shop">
+    <div class="shop-bar">
+      <span class="shop-title">🛒 Epic Face Emporium</span>
+      <span class="shop-wallet" id="shop-wallet">💎 —</span>
+      <button id="shop-close" type="button" class="lb-x" aria-label="Close">×</button>
+    </div>
+    <div class="shop-aisle" id="shop-aisle"></div>
+    <div class="shop-counter">
+      <span class="counter-tag">▦ CHECKOUT</span>
+      <span class="counter-hint" id="shop-hint">Grab a pack off the shelf — take it to the counter to open it!</span>
+    </div>
+  </div>
+  <div class="pack-open" id="pack-open" hidden></div>
+</div>
+
 <button type="button" id="side-toggle" aria-label="Pages menu">☰</button>
 <nav id="sidebar" aria-label="Pages">
   <div class="side-head">★ Pages</div>
   <button type="button" data-go="top"><span class="ico">🏠</span><span class="label">Home</span></button>
   <button type="button" data-go="games"><span class="ico">🎮</span><span class="label">Games</span></button>
   <button type="button" data-go="board"><span class="ico">🏆</span><span class="label">Scores</span></button>
+  <button type="button" data-act="shop"><span class="ico">🛒</span><span class="label">Shop</span></button>
   <button type="button" data-act="request"><span class="ico">📣</span><span class="label">Request</span></button>
   <button type="button" data-act="account" id="side-account"><span class="ico">👤</span><span class="label">Account</span></button>
   <button type="button" data-act="music" id="side-music"><span class="ico">🎵</span><span class="label">Music</span></button>

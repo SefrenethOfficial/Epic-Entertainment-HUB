@@ -116,7 +116,9 @@ export function openAccount() {
   const me = backend.me;
   if (!me) return openAuth();
   const body = el('div', { className: 'win-form' },
-    el('p', { className: 'win-who' }, el('strong', {}, me.username), ' ', el('span', { className: 'rank rank-' + me.rank }, RANK_NAMES[me.rank])),
+    el('div', { className: 'win-avatar-row' },
+      el('img', { className: 'win-avatar', src: backend.pfpSrc(me.pfp), alt: '' }),
+      el('p', { className: 'win-who' }, el('strong', {}, me.username), ' ', el('span', { className: 'rank rank-' + me.rank }, RANK_NAMES[me.rank]))),
     el('p', { className: 'win-stats' },
       el('strong', {}, (me.xp || 0).toLocaleString()), ' XP',
       '  •  ', el('strong', {}, (me.diamonds || 0).toLocaleString()), ' diamonds',

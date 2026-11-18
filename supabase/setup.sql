@@ -506,3 +506,69 @@ grant select on public.hub_board_diamonds to anon, authenticated;
 -- Players can rename themselves any time: the "edit own profile" policy above
 -- already allows updating username (grant update (username) on profiles), and
 -- the unique index profiles_username_key enforces one name per person.
+
+-- ------------------------------------------------- profile pictures (the shop)
+-- Players collect Awesome-Face variants from the department-store shop, paying
+-- diamonds. Everyone starts owning + equipping the classic face. Prices live in
+-- pfp_items so buying is charged server-side (hub_buy_pfp), never client-faked.
+alter table public.profiles
+  add column if not exists pfp text not null default 'classic',
+  add column if not exists owned_pfps text[] not null default array['classic'];
+
+create table if not exists public.pfp_items (
+  id text primary key, name text not null,
+  price int not null default 0, rarity text not null default 'common', sort int not null default 0
+);
+insert into public.pfp_items (id, name, price, rarity, sort) values
+  ('classic','Awesome Face',0,'starter',0), ('nerd','Specs Face',50,'common',1),
+  ('stache','Mustache Face',120,'uncommon',2), ('patch','Patch Face',200,'rare',3),
+  ('zombie','Undead Face',300,'legendary',4)
+on conflict (id) do update set name=excluded.name, price=excluded.price, rarity=excluded.rarity, sort=excluded.sort;
+alter table public.pfp_items enable row level security;
+drop policy if exists "pfp items public" on public.pfp_items;
+create policy "pfp items public" on public.pfp_items for select using (true);
+grant select on public.pfp_items to anon, authenticated;
+
+create or replace function public.hub_buy_pfp(p_face text)
+returns table(diamonds int, pfp text, owned_pfps text[])
+language plpgsql security definer set search_path = public as $$
+declare v_price int; v_owned text[]; v_dia int;
+begin
+  select price into v_price from public.pfp_items where id = p_face;
+  if v_price is null then raise exception 'No such item'; end if;
+  select p.owned_pfps, p.diamonds into v_owned, v_dia from public.profiles p where p.id = auth.uid();
+  if v_owned is null then raise exception 'Not signed in'; end if;
+  if p_face = any(v_owned) then
+    update public.profiles set pfp = p_face where id = auth.uid();
+  else
+    if v_dia < v_price then raise exception 'Not enough diamonds'; end if;
+    update public.profiles set diamonds = diamonds - v_price,
+      owned_pfps = array_append(owned_pfps, p_face), pfp = p_face where id = auth.uid();
+  end if;
+  return query select p.diamonds, p.pfp, p.owned_pfps from public.profiles p where p.id = auth.uid();
+end $$;
+
+create or replace function public.hub_equip_pfp(p_face text)
+returns table(pfp text) language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.profiles where id = auth.uid() and p_face = any(owned_pfps))
+    then raise exception 'You don''t own that face'; end if;
+  update public.profiles set pfp = p_face where id = auth.uid();
+  return query select p.pfp from public.profiles p where p.id = auth.uid();
+end $$;
+grant execute on function public.hub_buy_pfp(text), public.hub_equip_pfp(text) to authenticated;
+
+-- Board views now carry the equipped face too (drop/recreate: column added).
+drop view if exists public.hub_board_alltime;  drop view if exists public.hub_board_diamonds;
+drop view if exists public.hub_board_epic;      drop view if exists public.hub_board_weekly;
+create view public.hub_board_alltime with (security_invoker = true) as
+  select username, rank, pfp, xp as score from public.profiles where xp > 0 order by xp desc, username limit 500;
+create view public.hub_board_diamonds with (security_invoker = true) as
+  select username, rank, pfp, diamonds as score from public.profiles where diamonds > 0 order by diamonds desc, username limit 500;
+create view public.hub_board_epic with (security_invoker = true) as
+  select username, rank, pfp, epic_points as score from public.profiles where epic_points > 0 order by epic_points desc, username limit 500;
+create view public.hub_board_weekly with (security_invoker = true) as
+  select username, rank, pfp, weekly_xp as score from public.profiles
+  where week_key = public.hub_week_key() and weekly_xp > 0 order by weekly_xp desc, username limit 500;
+grant select on public.hub_board_alltime, public.hub_board_diamonds,
+  public.hub_board_epic, public.hub_board_weekly to anon, authenticated;

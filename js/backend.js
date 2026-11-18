@@ -58,7 +58,7 @@ function loadLibrary() {
 async function loadProfile(user) {
   if (!user) { me = null; return; }
   const { data } = await db.from('profiles')
-    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward, epic_points')
+    .select('username, rank, xp, weekly_xp, diamonds, streak, last_reward, epic_points, pfp, owned_pfps')
     .eq('id', user.id).maybeSingle();
   me = {
     id: user.id,
@@ -70,6 +70,8 @@ async function loadProfile(user) {
     streak: (data && data.streak) || 0,
     lastReward: (data && data.last_reward) || null,
     epicPoints: Number((data && data.epic_points) || 0),
+    pfp: (data && data.pfp) || 'classic',
+    owned: (data && data.owned_pfps) || ['classic'],
   };
 }
 
@@ -180,6 +182,53 @@ export async function renameUser(username) {
   me.username = data[0].username;
   // keep auth metadata in step (best-effort; the board reads the profiles row)
   await db.auth.updateUser({ data: { username: me.username } }).then(() => {}, () => {});
+}
+
+/* --------------------------- shop (profile pics) --------------------------- */
+
+// The face a player has equipped drives their avatar everywhere. Default is the
+// classic Awesome Face.
+export const DEFAULT_PFP = 'classic';
+export const pfpSrc = (id) => 'assets/pfp/' + (id || DEFAULT_PFP) + '.png';
+
+// The catalogue, from the DB (prices are authoritative there). Sorted for the
+// shelves. Falls back to a built-in list if the table can't be read.
+const FALLBACK_ITEMS = [
+  { id: 'classic', name: 'Awesome Face', price: 0, rarity: 'starter', sort: 0 },
+  { id: 'nerd', name: 'Specs Face', price: 50, rarity: 'common', sort: 1 },
+  { id: 'stache', name: 'Mustache Face', price: 120, rarity: 'uncommon', sort: 2 },
+  { id: 'patch', name: 'Patch Face', price: 200, rarity: 'rare', sort: 3 },
+  { id: 'zombie', name: 'Undead Face', price: 300, rarity: 'legendary', sort: 4 },
+];
+export async function shopItems() {
+  if (!db) return FALLBACK_ITEMS;
+  const { data, error } = await db.from('pfp_items').select('id, name, price, rarity, sort').order('sort');
+  if (error || !data || !data.length) return FALLBACK_ITEMS;
+  return data.map((r) => ({ ...r, price: Number(r.price) || 0 }));
+}
+
+export function owns(face) { return Boolean(me && (me.owned || []).includes(face)); }
+
+// Buy a face (or equip it if already owned). Server deducts diamonds.
+export async function buyPfp(face) {
+  need();
+  if (!me) throw new Error('Pick a username first.');
+  const { data, error } = await db.rpc('hub_buy_pfp', { p_face: face });
+  if (error) throw fail(error);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (row) { me.diamonds = Number(row.diamonds) || 0; me.pfp = row.pfp; me.owned = row.owned_pfps || me.owned; }
+  return me;
+}
+
+// Equip a face you already own.
+export async function equipPfp(face) {
+  need();
+  if (!me) throw new Error('Pick a username first.');
+  const { data, error } = await db.rpc('hub_equip_pfp', { p_face: face });
+  if (error) throw fail(error);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (row) me.pfp = row.pfp;
+  return me;
 }
 
 /* -------------------------------- games ------------------------------- */
@@ -400,10 +449,10 @@ export async function leaderboard(scope) {
     : scope === 'diamonds' ? 'hub_board_diamonds'
     : scope === 'epic' ? 'hub_board_epic'
     : 'hub_board_weekly';
-  const { data, error } = await db.from(view).select('username, rank, score');
+  const { data, error } = await db.from(view).select('username, rank, pfp, score');
   if (error) throw fail(error);
   // bigint (Epic Points) can arrive as a string from PostgREST — coerce to a number.
-  return data.map((r) => ({ ...r, score: Number(r.score) || 0 }));
+  return data.map((r) => ({ ...r, pfp: r.pfp || 'classic', score: Number(r.score) || 0 }));
 }
 
 // Report the player's best Epic Points from the clicker (only ever increases).

@@ -125,8 +125,21 @@ music.preload = 'auto';
 let musicOn = true;
 try { musicOn = localStorage.getItem('eehub-music') !== 'off'; } catch (e) { /* default on */ }
 
+// The shop has its own theme (Friday Theme) that takes over while it's open.
+const shopSong = new Audio('assets/shop-theme.mp3');
+shopSong.loop = true;
+shopSong.volume = 0.55;
+shopSong.preload = 'auto';
+let shopActive = false;
+
 function syncMusic() {
-  if (secretActive) { music.pause(); return; }   // the secret has taken the stage
+  if (secretActive) { music.pause(); shopSong.pause(); return; }   // the secret has taken the stage
+  if (shopActive) {   // the shop's Friday Theme plays instead of the hub beat
+    music.pause();
+    if (musicOn && !document.hidden) shopSong.play().catch(() => {}); else shopSong.pause();
+    return;
+  }
+  shopSong.pause();
   if (musicOn && !playing && !document.hidden) music.play().catch(() => {});
   else music.pause();
 }
@@ -565,6 +578,7 @@ function renderBoardPage() {
       const medal = i < 3 ? ' lb-medal' + (i + 1) : '';
       const badge = p.rank === 'owner' ? '♔' : p.rank === 'admin' ? '★' : '';
       const nameTd = mk('td', { class: 'lb-nm r-' + p.rank },
+        mk('img', { class: 'lb-av', src: backend.pfpSrc(p.pfp), alt: '', draggable: false }),
         p.username + (mine ? ' (you)' : ''),
         badge ? mk('span', { class: 'lb-badge' }, badge) : null);
       return mk('tr', { class: mine ? 'lb-me' : '' },
@@ -608,6 +622,172 @@ function onRenamed() {
   const bd = $('leaderboard');
   if (bd) bd.addEventListener('click', (e) => { if (e.target === bd) closeLeaderboard(); });   // click the dim desktop to close
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && lbOpen) closeLeaderboard(); });
+})();
+
+/* ----------------------------- the face shop ----------------------------- */
+// A department store: shelves of face "packs". Tap one, it rides to the
+// counter, and a pack-opening animation reveals the face — now equipped.
+let shopOpen = false;
+let shopCatalog = null;          // loaded lazily from the backend
+let packBusy = false;            // one opening at a time
+
+const RARITY_FOIL = { starter: '#9aa6b2', common: '#5fae5f', uncommon: '#3f98da', rare: '#a862d8', legendary: '#e3a93a' };
+const RARITY_LABEL = { starter: 'STARTER', common: 'COMMON', uncommon: 'UNCOMMON', rare: 'RARE', legendary: 'LEGENDARY' };
+
+async function openShop() {
+  if (!$('shop')) return;
+  shopOpen = true; shopActive = true;
+  $('shop').hidden = false;
+  syncMusic();                   // Friday Theme takes over
+  if (!shopCatalog) { try { shopCatalog = await backend.shopItems(); } catch (e) { shopCatalog = []; } }
+  renderShop();
+  const x = $('shop-close'); if (x) x.focus();
+}
+function closeShop() {
+  shopOpen = false; shopActive = false;
+  if ($('shop')) $('shop').hidden = true;
+  if ($('pack-open')) { $('pack-open').hidden = true; $('pack-open').replaceChildren(); }
+  packBusy = false;
+  syncMusic();                   // hand the stage back to the hub beat
+}
+
+function renderShop() {
+  const aisle = $('shop-aisle'), wallet = $('shop-wallet');
+  if (!aisle) return;
+  if (wallet) wallet.textContent = '💎 ' + (backend.me ? (backend.me.diamonds || 0).toLocaleString() : '—');
+  const items = shopCatalog || [];
+  if (!items.length) { aisle.replaceChildren(mk('p', { class: 'lb-note' }, 'Shelves are being restocked…')); return; }
+  const shelves = [];
+  for (let i = 0; i < items.length; i += 3) shelves.push(items.slice(i, i + 3));
+  aisle.replaceChildren(...shelves.map((group, si) => mk('div', { class: 'shelf' },
+    mk('div', { class: 'shelf-label' }, si === 0 ? 'FACE PACKS · AISLE 1' : 'AISLE ' + (si + 1)),
+    mk('div', { class: 'shelf-row' }, ...group.map((it) => packEl(it))),
+    mk('div', { class: 'shelf-board' }))));
+}
+
+function packEl(it) {
+  const owned = backend.owns(it.id);
+  const equipped = backend.me && backend.me.pfp === it.id;
+  const el = mk('div', {
+    class: 'pack' + (owned ? ' owned' : '') + (equipped ? ' equipped' : ''),
+    style: '--foil:' + (RARITY_FOIL[it.rarity] || '#999'),
+    role: 'button', tabindex: '0', title: it.name,
+    onclick: () => packTap(it, el),
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); packTap(it, el); } },
+  },
+    mk('div', { class: 'pack-top' }, RARITY_LABEL[it.rarity] || 'FACE'),
+    mk('div', { class: 'pack-window' }, mk('img', { src: backend.pfpSrc(it.id), alt: it.name, draggable: false })),
+    mk('div', { class: 'pack-name' }, it.name),
+    equipped ? mk('div', { class: 'pack-price' }, 'Equipped')
+      : owned ? mk('div', { class: 'pack-price' }, 'Equip')
+      : mk('div', { class: 'pack-price' + (it.price ? '' : ' free') }, it.price ? '💎 ' + it.price : 'FREE'),
+    equipped ? mk('div', { class: 'pack-ribbon' }, '✓ ON')
+      : owned ? mk('div', { class: 'pack-ribbon' }, 'OWNED') : null,
+  );
+  return el;
+}
+
+async function packTap(it, el) {
+  if (packBusy) return;
+  if (!backend.me) { if (backend.configured) dialogs.openAuth(); else toast('Accounts are coming soon!'); return; }
+  if (backend.me.pfp === it.id) { toast(it.name + ' is already your face.'); return; }
+
+  if (backend.owns(it.id)) {            // already own it → just equip
+    packBusy = true;
+    try { await backend.equipPfp(it.id); afterPfpChange(); toast('Equipped ' + it.name + '!'); }
+    catch (e) { toast(e.message || 'Could not equip that.'); }
+    packBusy = false;
+    return;
+  }
+  if ((backend.me.diamonds || 0) < it.price) {   // friendly shake before hitting the server
+    el.classList.remove('denied'); void el.offsetWidth; el.classList.add('denied');
+    toast('Not enough 💎 — you need ' + it.price + '.');
+    return;
+  }
+
+  packBusy = true;
+  try {
+    await backend.buyPfp(it.id);        // server deducts diamonds + equips
+    if ($('shop-wallet')) $('shop-wallet').textContent = '💎 ' + (backend.me.diamonds || 0).toLocaleString();
+    await runOpening(it, el);           // ride to the counter + open the pack
+    afterPfpChange();
+  } catch (e) {
+    toast(e.message || 'Could not buy that.');
+  }
+  packBusy = false;
+}
+
+// Pack rides to the counter, then bursts open to reveal the face.
+function runOpening(it, el) {
+  return new Promise((resolve) => {
+    const foilCol = RARITY_FOIL[it.rarity] || '#999';
+    const r = el.getBoundingClientRect();
+    const fly = mk('div', { class: 'pack-fly', style: '--foil:' + foilCol });
+    fly.style.left = r.left + 'px'; fly.style.top = r.top + 'px'; fly.style.width = r.width + 'px';
+    fly.appendChild(el.cloneNode(true));
+    document.body.appendChild(fly);
+    const counter = document.querySelector('.shop-counter');
+    const cr = counter ? counter.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight - 40, width: 0, height: 0 };
+    const tx = (cr.left + cr.width / 2) - (r.left + r.width / 2);
+    const ty = (cr.top + cr.height / 2) - (r.top + r.height / 2);
+    requestAnimationFrame(() => { fly.style.transform = `translate(${tx}px, ${ty}px) scale(0.4) rotate(12deg)`; fly.style.opacity = '0.2'; });
+
+    setTimeout(() => {
+      fly.remove();
+      const stage = $('pack-open');
+      const foil = mk('div', { class: 'open-foil', style: '--foil:' + foilCol });
+      const glow = mk('div', { class: 'open-glow' });
+      const face = mk('div', { class: 'open-face' }, mk('img', { src: backend.pfpSrc(it.id), alt: it.name, draggable: false }));
+      const cap = mk('div', { class: 'open-caption' },
+        mk('div', { class: 'got' }, 'You got ', mk('b', {}, it.name)),
+        mk('div', { class: 'tap' }, 'tap to continue'));
+      const wrap = mk('div', { class: 'open-stage' }, glow, foil, face, cap);
+      stage.replaceChildren(wrap);
+      stage.hidden = false;
+
+      setTimeout(() => {
+        foil.classList.add('pop'); glow.classList.add('on'); face.classList.add('reveal'); cap.classList.add('show');
+        spawnConfetti(wrap);
+      }, 720);
+
+      let done = false;
+      const finish = () => { if (done) return; done = true; stage.hidden = true; stage.replaceChildren(); stage.removeEventListener('click', finish); resolve(); };
+      stage.addEventListener('click', finish);
+      setTimeout(finish, 2600);         // auto-dismiss
+    }, 640);
+  });
+}
+
+function spawnConfetti(wrap) {
+  const cols = ['#ffe14d', '#ff5d8f', '#4ad4ff', '#7CFC58', '#c0398a', '#fff'];
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, d = 90 + Math.random() * 150;
+    const c = mk('div', { class: 'confetti' });
+    c.style.background = cols[i % cols.length];
+    c.style.setProperty('--dx', Math.cos(a) * d + 'px');
+    c.style.setProperty('--dy', Math.sin(a) * d + 'px');
+    c.style.setProperty('--rot', (Math.random() * 720 - 360) + 'deg');
+    c.style.borderRadius = Math.random() < 0.5 ? '50%' : '1px';
+    c.style.animation = `confetti-go ${0.7 + Math.random() * 0.5}s ease-out forwards`;
+    wrap.appendChild(c);
+  }
+}
+
+// After buying/equipping: refresh the avatar everywhere.
+function afterPfpChange() {
+  renderShop();
+  if (hub) hub.rebuild();
+  renderQuickList();
+  syncSidebarAccount();
+  if (lbOpen) renderBoardPage();
+}
+
+// Wire the shop's static controls once.
+(() => {
+  const close = $('shop-close'); if (close) close.addEventListener('click', closeShop);
+  const bd = $('shop');
+  if (bd) bd.addEventListener('click', (e) => { if (e.target === bd) closeShop(); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && shopOpen && $('pack-open') && $('pack-open').hidden) closeShop(); });
 })();
 
 // Reload the list of HUB-added games, apply play counts, sort most-played first.
@@ -2039,6 +2219,15 @@ function syncSidebarAccount() {
   const signedIn = Boolean(backend.me);
   a.title = signedIn ? 'My account' : 'Join';
   a.querySelector('.label').textContent = signedIn ? 'Account' : 'Join';
+  // show the equipped face as the account icon when signed in
+  const ico = a.querySelector('.ico');
+  if (ico) {
+    if (signedIn) {
+      const img = document.createElement('img');
+      img.className = 'side-av'; img.src = backend.pfpSrc(backend.me.pfp); img.alt = '';
+      ico.replaceChildren(img);
+    } else ico.textContent = '👤';
+  }
 }
 
 function setupSidebar() {
@@ -2051,6 +2240,8 @@ function setupSidebar() {
     else if (hub) hub.scrollToSection(btn.dataset.go);
     closeDrawer();
   }));
+  const shopBtn = bar.querySelector('[data-act="shop"]');
+  if (shopBtn) shopBtn.addEventListener('click', () => { openShop(); closeDrawer(); });
   bar.querySelector('[data-act="request"]').addEventListener('click', () => { window.open('https://forms.gle/7CSei8ZGthE4m54b8', '_blank', 'noopener'); closeDrawer(); });
   bar.querySelector('[data-act="account"]').addEventListener('click', () => { openAccountOrAuth(); closeDrawer(); });
   const musicBtn = bar.querySelector('[data-act="music"]');
@@ -2085,7 +2276,7 @@ async function boot() {
   }
   // Accounts load in the background so a sleeping server never blocks the page.
   dialogs.setHooks({ toast, gamesChanged: refreshGames, renamed: onRenamed });
-  backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); if (lbOpen) renderBoardPage(); });
+  backend.onAccountChange(() => { renderQuickList(); syncNewsEdit(); syncSidebarAccount(); if (hub) hub.rebuild(); if (lbOpen) renderBoardPage(); if (shopOpen) renderShop(); });
   backend.start().then(() => Promise.all([refreshGames(), refreshBoard(), backend.getNews().then(renderNews)])).then(() => {
     syncNewsEdit();
     const linked = gameFromHash();           // a share link to a HUB-added game
@@ -2104,6 +2295,9 @@ async function boot() {
       openGame, closeGame,
       openLeaderboard, closeLeaderboard,
       setBoardScope: (s) => { board.scope = s; renderBoardPage(); },
+      openShop, closeShop,
+      shopItems: () => shopCatalog,
+      shopAudio: () => ({ shopActive, shopPlaying: !shopSong.paused, musicPaused: music.paused }),
     };
   }
 
